@@ -1,0 +1,36 @@
+{
+  "name": "typescript-io",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^23.3.10",
+    "@types/lodash": "^4.14.119",
+    "@types/node": "^10.12.14",
+    "highland": "^2.13.0",
+    "jest": "^23.6.0",
+    "lodash": "^4.17.11",
+    "ts-jest": "^23.10.5",
+    "tslint": "^5.11.0",
+    "typescript": "^3.2.2"
+  },
+  "scripts": {
+    "watch": "tsc -w",
+    "test": "jest",
+    "clean": "rimraf dist",
+    "build": "tsc",
+    "prepublish": "yarn run clean && yarn run test && yarn run build"
+  },
+  "jest": {
+    "transform": {
+      "^.+\\.(j|t)s$": "ts-jest"
+    },
+    "moduleFileExtensions": [
+      "js",
+      "ts"
+    ],
+    "testMatch": [
+      "**/src/**/__tests__/*.spec.ts"
+    ]
+  }
+}
