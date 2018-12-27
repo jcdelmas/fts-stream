@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "module": "commonjs",
+    "lib": [
+      "es5",
+      "es6",
+      "es2015.core",
+      "es2017",
+      "esnext"
+    ],
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "types": [
+      "jest",
+      "node"
+    ],
+    "esModuleInterop": true
+  }
+}
