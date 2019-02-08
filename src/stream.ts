@@ -2,9 +2,10 @@ import { OverflowStrategy, Queue, QueueReader, QueueWriter } from './queue'
 import { Chunk } from './chunk'
 import { Managed, ManagedImpl } from './managed'
 import { Semaphore } from './semaphore'
-import { bracket } from './promises'
+import { bracket, promiseChannel } from './promises'
 import { broadcast } from './broadcast'
 import { balance } from './balance'
+import { Consumer } from './consumer'
 
 export type Pipe<I, O> = (s: Stream<I>) => Stream<O>
 export type Sink<I, O> = (s: Stream<I>) => Promise<O>
@@ -442,6 +443,61 @@ export abstract class Stream<A> {
     return this.map(a => {
       f(a)
       return a
+    })
+  }
+
+  async peel<R>(consumer: Consumer<A, R, unknown>): Promise<[R, Stream<A>]> {
+    const chan = promiseChannel<[R, Stream<A>]>()
+    this.chunks().asQueue().use(async queue => {
+      let s = consumer.initial
+      while (!chan.closed && consumer.cont(s)) {
+        const take = await queue.take()
+        await take.fold(
+          async a => { s = await consumer.update(s, a) },
+          async () => {
+            const r = await consumer.result(s)
+            chan.resolve([r, Stream.empty()])
+          },
+          async err => { chan.reject(err) }
+        )
+      }
+      if (!chan.closed) {
+        const result = await consumer.result(s)
+        const remaining = consumer.remaining(s)
+        const streamEnd = promiseChannel<void>()
+        chan.resolve([
+          result,
+          Stream.from(remaining.toArray())
+            .concat(Stream.create(push => readQueue(queue, push)))
+            .onTerminate(() => streamEnd.resolve())
+        ])
+        await streamEnd.promise
+      }
+    })
+    return chan.promise
+  }
+
+  transduce<R>(consumer: Consumer<A, R, unknown>): Stream<R> {
+    return Stream.createSimple(async push => {
+      let s = consumer.initial
+      const cont = await this.foreachChunks(async chunk => {
+        s = await consumer.update(s, chunk)
+        if (!consumer.cont(s)) {
+          const result = await consumer.result(s)
+          const cont = push(result)
+          if (cont) {
+            s = consumer.update(consumer.initial, consumer.remaining(s))
+          }
+          return cont
+        } else {
+          return true
+        }
+      })
+      if (cont) {
+        const result = await consumer.result(s)
+        return push(result)
+      }
+      return cont
     })
   }
 

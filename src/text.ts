@@ -1,5 +1,6 @@
-import { Pipe, Stream } from './stream'
+import { P, Pipe, Stream } from './stream'
 import { Chunk } from './chunk'
+import { Consumer } from './consumer'
 
 export const lines: Pipe<string, string> = (stream: Stream<string>) => Stream.create(push => {
   let remaining: string[] = []
@@ -52,3 +53,20 @@ export const lines: Pipe<string, string> = (stream: Stream<string>) => Stream.cr
     return cont && remaining.length > 0 ? await push(Chunk.singleton(remaining.join(''))) : cont
   })
 })
+
+
+export const linesCons: Consumer<string, string, any> = {
+  initial: [],
+  update(s: string[], a: Chunk<string>) {
+
+  },
+  cont(s: any): boolean {
+    return true
+  },
+  result(s: any): string {
+
+  }
+  remaining(s: any): Chunk<string> {
+
+  }
+}

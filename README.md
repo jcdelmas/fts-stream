@@ -9,7 +9,6 @@
 ### Pipes
 
  * Sliding
- * Buffer
  * Distinct
  * Recover with
  
