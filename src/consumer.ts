@@ -1,62 +1,96 @@
 import { Chunk } from './chunk'
-import { P } from './stream'
+import { Maybe, P } from './helpers';
 
-export interface Consumer<A, R, S> {
-  initial: S
-  update(s: S, a: Chunk<A>): P<Consumer.Step<S, Chunk<A>>>
-  result(s: S): P<R>
+export class Consumer<A, R> {
+  constructor(public iteratee: () => Iteratee<A, R>) {}
 }
 
-export interface SimpleConsumer<A, R, S> {
-  initial: S
-  update(s: S, a: A): P<Consumer.Step<S, A | undefined>>
-  result(s: S): P<R>
+interface Iteratee<A, R> {
+  update(a: Chunk<A>): P<Consumer.Cont | Chunk<A>>
+  result(): P<R>
+}
+
+export interface SimpleIteratee<A, R> {
+  update(a: A): Consumer.Cont | A | undefined
+  result(): R
 }
 
 export namespace Consumer {
-  export function simple<A, R, S>(consumer: SimpleConsumer<A, R, S>): Consumer<A, R, S> {
-    return {
-      initial: consumer.initial,
-      async update(s: S, as: Chunk<A>) {
-        let i = 0
-        for (const a of as) {
-          const step = await consumer.update(s, a)
-          i++
-          if (step.done) {
-            const base = as.drop(i)
-            const remaining = step.remaining !== undefined ? Chunk.singleton(step.remaining).concat(base) : base
-            return Step.done(step.state, remaining)
-          } else {
-            s = step.state
+  export type Cont = { __tag: 'cont' }
+  export const Cont: Cont = { __tag: 'cont' }
+
+  export function simple<A, R>(factory: () => SimpleIteratee<A, R>): Consumer<A, R> {
+    return new Consumer<A, R>(() => {
+      const iteratee = factory()
+      let chunkRemaining: Chunk<A> | undefined
+      return {
+        async update(as: Chunk<A>) {
+          let i = 0
+          for (const a of as) {
+            const resp = await iteratee.update(a)
+            i++
+            if (resp !== Cont) {
+              const base = as.drop(i)
+              return resp !== undefined ? Chunk.singleton(resp as A).concat(base) : base
+            }
           }
+          return Cont
+        },
+        result() {
+          return iteratee.result()
         }
-        return Step.cont(s)
-      },
-      result(s: S): P<R> {
-        return consumer.result(s)
-      },
-    }
+      }
+    })
   }
 
-  export interface Cont<S> {
-    done: false,
-    state: S,
+  export function head<A>(): Consumer<A, A | undefined> {
+    return simple(() => {
+      let last: A | undefined
+      return {
+        update(a: A): undefined {
+          last = a
+          return undefined
+        },
+        result(): A | undefined {
+          return last
+        }
+      }
+    })
   }
 
-  export interface Done<S, A> {
-    done: true,
-    state: S,
-    remaining: A,
+  export function take<A>(n: number): Consumer<A, A[]> {
+    if (n < 1) throw new Error('n must be greater than or equal to 1')
+    return simple<A, A[]>(() => {
+      let i = n
+      const acc: A[] = []
+      return {
+        update(a: A): Cont | undefined {
+          acc.push(a)
+          i-- 
+          return i > 0 ? Cont : undefined
+        },
+        result(): A[] {
+          return acc
+        }
+      }
+    })
   }
 
-  export type Step<S, A> = Cont<S> | Done<S, A>
-
-  export namespace Step {
-    export function cont<S>(state: S): Cont<S> {
-      return { done: false, state }
-    }
-    export function done<S, A>(state: S, remaining: A): Done<S, A> {
-      return { done: true, state, remaining }
-    }
+  export function takeWhile<A>(pred: (a: A) => boolean): Consumer<A, A[]> {
+    return simple<A, A[]>(() => {
+      const acc: A[] = []
+      return {
+        update(a: A): Cont | A {
+          if (pred(a)) {
+            acc.push(a)
+            return Cont
+          }
+          return a
+        },
+        result(): A[] {
+          return acc
+        }
+      }
+    })
   }
 }

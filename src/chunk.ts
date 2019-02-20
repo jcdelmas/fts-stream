@@ -364,7 +364,7 @@ class Concat<A, B> extends Chunk<A | B> {
 }
 
 export namespace Chunk {
-  export function empty<A>() {
+  export function empty<A>(): Chunk<A> {
     return new Empty()
   }
 

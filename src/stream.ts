@@ -6,11 +6,10 @@ import { Managed, ManagedImpl } from './managed'
 import { bracket, promiseChannel } from './promises'
 import { OverflowStrategy, Queue, QueueReader, QueueWriter } from './queue'
 import { Semaphore } from './semaphore'
+import { P } from './helpers';
 
 export type Pipe<I, O> = (s: Stream<I>) => Stream<O>
 export type Sink<I, O> = (s: Stream<I>) => Promise<O>
-
-export type P<A> = A | Promise<A>
 
 export abstract class Stream<A> {
 
@@ -437,27 +436,28 @@ export abstract class Stream<A> {
     })
   }
 
-  async peel<R>(consumer: Consumer<A, R, unknown>): Promise<[R, Stream<A>]> {
+  async peel<R>(consumer: Consumer<A, R>): Promise<[R, Stream<A>]> {
     const chan = promiseChannel<[R, Stream<A>]>()
     this.chunks().asQueue().use(async queue => {
-      let step = Consumer.Step.cont(consumer.initial) as Consumer.Step<unknown, Chunk<A>>
-      while (!chan.closed && !step.done) {
+      const iteratee = consumer.iteratee()
+      let resp: Chunk<A> | Consumer.Cont = Consumer.Cont
+      while (!chan.closed && resp === Consumer.Cont) {
         const take = await queue.take()
         await take.fold(
-          async a => { step = await consumer.update(step.state, a) },
+          async a => { resp = await iteratee.update(a) },
           async () => {
-            const r = await consumer.result(step.state)
+            const r = await iteratee.result()
             chan.resolve([r, Stream.empty()])
           },
           async err => { chan.reject(err) },
         )
       }
-      if (step.done && !chan.closed) {
-        const result = await consumer.result(step.state)
+      if (resp instanceof Chunk && !chan.closed) {
+        const result = await iteratee.result()
         const streamEnd = promiseChannel<void>()
         chan.resolve([
           result,
-          Stream.from(step.remaining.toArray())
+          Stream.from(resp.toArray())
             .concat(Stream.create(push => readQueue(queue, push)))
             .onTerminate(() => streamEnd.resolve()),
         ])
@@ -467,24 +467,24 @@ export abstract class Stream<A> {
     return chan.promise
   }
 
-  transduce<R>(consumer: Consumer<A, R, unknown>): Stream<R> {
+  transduce<R>(consumer: Consumer<A, R>): Stream<R> {
     return Stream.createSimple(async push => {
-      let s = consumer.initial
+      let iteratee = consumer.iteratee()
       const cont2 = await this.foreachChunks(async chunk => {
-        let step = await consumer.update(s, chunk)
+        let resp = await iteratee.update(chunk)
         let cont = true
-        while (step.done && cont) {
-          const result = await consumer.result(step.state)
+        while (resp instanceof Chunk && cont) {
+          const result = await iteratee.result()
           cont = await push(result)
           if (cont) {
-            step = await consumer.update(consumer.initial, step.remaining)
+            iteratee = consumer.iteratee()
+            resp = await iteratee.update(resp)
           }
         }
-        s = step.state
         return cont
       })
       if (cont2) {
-        const result = await consumer.result(s)
+        const result = await iteratee.result()
         return push(result)
       }
       return cont2
