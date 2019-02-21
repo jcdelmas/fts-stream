@@ -101,9 +101,12 @@ export abstract class Stream<A> {
         const cont = await push(head)
         if (cont) {
           return tail.foreach0(a => {
-            const ret = f(prev, a) ? push(a) : true
-            prev = a
-            return ret
+            if (f(prev, a)) {
+              prev = a
+              return push(a)
+            } else {
+              return true
+            }
           })
         } else {
           return false
