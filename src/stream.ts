@@ -73,10 +73,44 @@ export abstract class Stream<A> {
     return Stream.create(push => this.foreach0(a => push(Chunk.seq(f(a)))))
   }
 
+  /**
+   * Emits only inputs which match the supplied predicate.
+   * 
+   * Example:
+   *
+   * ```ts 
+   * await Stream.range(1, 10).filter(a => a % 2 === 0).toArray()
+   * // => [2, 4, 6, 8, 10]
+   * ```
+   */
   filter<B>(f: (a: A) => boolean): Stream<A> {
     return this.simplePipe(push => async chunk => {
       const filtered = chunk.filter(f)
       return filtered.isEmpty ? true : await push(filtered)
+    })
+  }
+
+  /**
+   * Like `filter`, but the predicate `f` depends on the previously emitted and current elements.
+   */
+  filterWithPrevious(f: (prev: A, cur: A) => boolean): Stream<A> {
+    return Stream.createSimple(async push => {
+      const [head, tail] = await this.peel(Consumer.head())
+      if (head !== undefined) {
+        let prev: A = head
+        const cont = await push(head)
+        if (cont) {
+          return tail.foreach0(a => {
+            const ret = f(prev, a) ? push(a) : true
+            prev = a
+            return ret
+          })
+        } else {
+          return false
+        }
+      } else {
+        return true
+      }
     })
   }
 
@@ -268,6 +302,10 @@ export abstract class Stream<A> {
     })
   }
 
+  distinct(): Stream<A> {
+    return this.filterWithPrevious((prev, current) => prev != current)
+  }
+
   chunks(): Stream<Chunk<A>> {
     return Stream.createSimple(this.foreachChunks)
   }
@@ -454,8 +492,24 @@ export abstract class Stream<A> {
     }, { capacity: 1, overflowStrategy: OverflowStrategy.SLIDING })
   }
 
+  /**
+   * Send a last element when an error occurred and gracefully complete the stream.
+   */
   recover<B>(f: (err: any) => B): Stream<A | B> {
-    return Stream.create(push => this.foreachChunks(chunk => push(chunk)).catch(err => push(Chunk.singleton(f(err)))))
+    return Stream.create(push => this.foreachChunks(push).catch(err => push(Chunk.singleton(f(err)))))
+  }
+
+  /**
+   * Switch to alternative `Stream` when an error occurred. 
+   *  It will stay in effect after an error has been recovered up to `attempts` number of times s
+   * o that each time there is an error, it is fed into the `f` and a new Stream is started.
+   */
+  recoverWithRetries<B>(attempts: number, f: (err: any) => Stream<B>): Stream<A | B> {
+    if (attempts > 0) {
+      return Stream.create(push => this.foreachChunks(push).catch(err => f(err).recoverWithRetries(attempts - 1, f).foreachChunks(push)))
+    } else {
+      return this
+    }
   }
 
   onTerminate(f: () => P<void>): Stream<A> {
