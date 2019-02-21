@@ -235,6 +235,39 @@ export abstract class Stream<A> {
     return this.chunked(size).chunks().map(c => c.toArray())
   }
 
+  /**
+   * Apply a sliding window over the stream and return the windows as groups of elements, with the last group possibly 
+   * smaller than requested due to end-of-stream.
+   * 
+   * @param n The window size. Must be positive.
+   * @param step The step size. Must be positive.
+   */
+  sliding(n: number, step: number = 1): Stream<A[]> {
+    return Stream.createSimple<A[]>(async push => {
+      let acc: A[] = []
+      let count = 0
+      const cont2 = await this.foreach0(async a => {
+        if (count >= 0) {
+          acc.push(a)
+        }
+        count++
+        if (count === n) {
+          const cont = await push(acc.slice())
+          acc = acc.slice(step)
+          count = count - step
+          return cont
+        } else {
+          return true
+        }
+      })
+      if (cont2 && count > n - step) {
+        return push(acc)
+      } else {
+        return cont2
+      }
+    })
+  }
+
   chunks(): Stream<Chunk<A>> {
     return Stream.createSimple(this.foreachChunks)
   }

@@ -3,6 +3,19 @@ import { Maybe, P } from './helpers';
 
 export class Consumer<A, R> {
   constructor(public iteratee: () => Iteratee<A, R>) {}
+
+  mapResult<R2>(f: (r: R) => P<R2>): Consumer<A, R2> {
+    return new Consumer(() => {
+      const it = this.iteratee()
+      return {
+        update: it.update.bind(it),
+        async result() {
+          const r = await it.result()
+          return f(r)
+        }
+      }
+    })
+  }
 }
 
 interface Iteratee<A, R> {
@@ -91,6 +104,44 @@ export namespace Consumer {
           return acc
         }
       }
+    })
+  }
+
+  export function chain<A, R1, R2>(c1: Consumer<A, R1>, c2: Consumer<A, R2>): Consumer<A, [R1, R2]>
+  export function chain<A, R1, R2, R3>(
+    c1: Consumer<A, R1>, 
+    c2: Consumer<A, R2>, 
+    c3: Consumer<A, R3>
+  ): Consumer<A, [R1, R2, R3]>
+  export function chain<A, R1, R2, R3, R4>(
+    c1: Consumer<A, R1>, 
+    c2: Consumer<A, R2>, 
+    c3: Consumer<A, R3>, 
+    c4: Consumer<A, R4>
+  ): Consumer<A, [R1, R2, R3, R4]>
+  
+  export function chain<A>(...consumers: Consumer<A, any>[]): Consumer<A, any[]> {
+    return new Consumer(() => {
+      const iteratees = consumers.map(c => c.iteratee())
+      let idx: number = 0
+      const len = iteratees.length
+      return {
+        async update(a: Chunk<A>): Promise<Cont | Chunk<A>> {
+          let resp = iteratees[idx].update(a)
+          while (resp instanceof Chunk) {
+            idx++
+            if (idx < len) {
+              resp = iteratees[idx].update(resp)
+            } else {
+              return resp
+            }
+          }
+          return Cont
+        },
+        result(): Promise<any[]> {
+          return Promise.all(iteratees.map(it => it.result()))
+        }
+      } 
     })
   }
 }

@@ -8,7 +8,6 @@
 
 ### Pipes
 
- * Sliding
  * Distinct
  * Recover with
  
