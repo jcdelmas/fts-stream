@@ -1,7 +1,8 @@
 import { bracket } from '../promises'
-import { P, Sink, Stream } from '../stream'
+import { Sink, Stream } from '../stream'
 import ReadableStream = NodeJS.ReadableStream
 import WritableStream = NodeJS.WritableStream
+import { P } from '../helpers';
 
 export function nodeStringReadableStreamToStream<S extends ReadableStream = ReadableStream>(
   streamFactory: () => S,
