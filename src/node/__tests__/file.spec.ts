@@ -27,7 +27,7 @@ describe('files', () => {
     const filePath = path.join(tmpDir, fileName)
 
     await Stream.range(1, lines)
-      .map(() => Buffer.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\n', 'UTF-8'))
+      .map(() => Buffer.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\n', 'utf8'))
       .to(writeBinaryFile(filePath))
     const result = await readBinaryFile(filePath).fold(0, (sum, str) => sum + str.length)
     expect(result).toEqual(lines * 64)
