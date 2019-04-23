@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "ES2017",
     "module": "commonjs",
+    "declaration": true,
     "lib": [
       "es5",
       "es6",
