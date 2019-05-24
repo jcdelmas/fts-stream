@@ -12,7 +12,7 @@ export function broadcast<A>(): Pipe<A, Stream<A>> {
   return stream => Stream.lazy(() => {
     const subscribers: Subscriber<Chunk<A>>[] = []
 
-    const substream = Stream.create<A>(push => {
+    const substream = Stream.createChunked<A>(push => {
       const subscriberTermination = promiseChannel<boolean>()
       const subscriber = new class {
         async next(chunk: Chunk<A>) {

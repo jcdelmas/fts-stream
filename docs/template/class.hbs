@@ -1,0 +1,48 @@
+---
+name: {{name}}
+route: /{{path}}
+---
+
+# {{name}}
+
+{{#each methods}}
+## {{name}}
+
+{{#each signatures}}
+
+```typescript
+{{{fullName}}}
+```
+
+{{#if description}}{{{description}}}{{/if}}
+
+{{#if parameters}}
+### Parameters
+
+{{#each parameters}} * **{{name}}**{{#if comment.text}}: {{comment.text}}{{/if}}
+{{/each}}
+{{!-- | Name | Type | Description |
+| - | - | - |
+{{#each parameters}}| **{{name}}** | *{{typeName}}* | {{comment.text}} |
+{{/each}} --}}
+
+{{/if}}
+
+{{#if examples}}
+### Example
+{{#each examples}}
+```typescript
+{{{this}}}
+```
+{{/each}}
+{{/if}}
+
+{{!-- ```json
+{{{json this}}}
+``` --}}
+
+{{/each}}
+
+---
+
+{{/each}}

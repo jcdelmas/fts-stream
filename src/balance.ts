@@ -20,7 +20,7 @@ export function balance<A>(): Pipe<A, Stream<A>> {
       ))
     })
 
-    const substream = Stream.create<A>(async push => {
+    const substream = Stream.createChunked<A>(async push => {
       const subscriberTermination = promiseChannel<boolean>()
       const subscriber = new class {
         async next(chunk: Chunk<A>) {

@@ -13,6 +13,12 @@ export type Sink<I, O> = (s: Stream<I>) => Promise<O>
 
 export abstract class Stream<A> {
 
+  /**
+   *
+   * @param push
+   *
+   * @private
+   */
   abstract foreachChunks(push: (as: Chunk<A>) => P<boolean>): Promise<boolean>
 
   foreach(push: (a: A) => void): Promise<void> {
@@ -26,6 +32,12 @@ export abstract class Stream<A> {
     return this.foreach(() => {})
   }
 
+  /**
+   *
+   * @param push
+   *
+   * @private
+   */
   foreach0(push: (a: A) => P<boolean>): Promise<boolean> {
     return this.foreachChunks(async as => {
       for (const a of as) {
@@ -45,6 +57,13 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   *
+   * @param s0
+   * @param f
+   *
+   * @private
+   */
   foldChunks<S>(s0: S, f: (s: S, as: Chunk<A>) => S): Promise<S> {
     let s = s0
     return this.foreachChunks(async chunk => {
@@ -66,22 +85,22 @@ export abstract class Stream<A> {
   }
 
   flatMap<B>(f: (a: A) => Stream<B>): Stream<B> {
-    return Stream.create(push => this.foreach0(a => f(a).foreachChunks(push)))
+    return Stream.createChunked(push => this.foreach0(a => f(a).foreachChunks(push)))
   }
 
   mapConcat<B>(f: (a: A) => B[]): Stream<B> {
-    return Stream.create(push => this.foreach0(a => push(Chunk.seq(f(a)))))
+    return Stream.createChunked(push => this.foreach0(a => push(Chunk.seq(f(a)))))
   }
 
   /**
    * Emits only inputs which match the supplied predicate.
-   * 
-   * Example:
    *
-   * ```ts 
+   * @param f The predicate function
+   *
+   * @example
+   *
    * await Stream.range(1, 10).filter(a => a % 2 === 0).toArray()
    * // => [2, 4, 6, 8, 10]
-   * ```
    */
   filter<B>(f: (a: A) => boolean): Stream<A> {
     return this.simplePipe(push => async chunk => {
@@ -94,7 +113,7 @@ export abstract class Stream<A> {
    * Like `filter`, but the predicate `f` depends on the previously emitted and current elements.
    */
   filterWithPrevious(f: (prev: A, cur: A) => boolean): Stream<A> {
-    return Stream.createSimple(async push => {
+    return Stream.create(async push => {
       const [head, tail] = await this.peel(Consumer.head())
       if (head !== undefined) {
         let prev: A = head
@@ -117,6 +136,16 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Emits the first n elements of this stream.
+   *
+   * @param n The number of elements
+   *
+   * @example
+   *
+   * await Stream.range(0, 100).take(5).toArray()
+   * // => [0, 1, 2, 3, 4]
+   */
   take(n: number): Stream<A> {
     return this.simplePipe(push => {
       let remaining = n
@@ -132,6 +161,16 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Emits the longest prefix of the input for which all elements test `true` according to `f`.
+   *
+   * @param f Predicate
+   *
+   * @example
+   *
+   * await Stream.range(0,100).takeWhile(_ != 5).toArray()
+   * // => [0, 1, 2, 3, 4]
+   */
   takeWhile(f: (a: A) => boolean): Stream<A> {
     return this.simplePipe(push => async chunk => {
       const filtered = chunk.takeWhile(f)
@@ -140,6 +179,16 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Drops `n` first elements of the input, then echoes the rest.
+   *
+   * @param n Number of elements to drop
+   *
+   * @example
+   *
+   * await Stream.range(0,10).drop(5).toArray()
+   * // => [5, 6, 7, 8, 9]
+   */
   drop(n: number): Stream<A> {
     return this.simplePipe(push => {
       let remaining = n
@@ -161,6 +210,16 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Drops elements from the head of this stream until the supplied predicate returns `false`.
+   *
+   * @param f Predicate
+   *
+   * @example
+   *
+   * await Stream.range(0,10).dropWhile(_ != 4).toArray()
+   * // => [4, 5, 6, 7, 8, 9]
+   */
   dropWhile(f: (a: A) => boolean): Stream<A> {
     return this.simplePipe(push => {
       let ok = false
@@ -232,17 +291,18 @@ export abstract class Stream<A> {
    * @param size The size of the buffer
    */
   buffer(size: number = 256, options: BufferOptions<A> = {}): Stream<A> {
-    return Stream.createSimple(
+    return Stream.create(
       push => this.asQueue({ capacity: size, ...options }).use(queue => readQueue(queue, push)),
     )
   }
 
   /**
    * Behaves like the identity function, but requests `chunkSize` elements at a time from the input.
-   * @param chunkSize
+   *
+   * @param chunkSize The size of the chunks
    */
   chunked(chunkSize: number): Stream<A> {
-    return Stream.create(async push => {
+    return Stream.createChunked(async push => {
       let buffer: Chunk<A> = Chunk.empty()
       const cont2 = await this.foreachChunks(async chunk => {
         let input = chunk
@@ -266,21 +326,32 @@ export abstract class Stream<A> {
   /**
    * Chunk up this stream into groups of the given size, with the last group possibly smaller than requested due to
    * end-of-stream.
-   * @param size
+   *
+   * @param size The group's size
+   *
+   * @example
+   *
+   * await Stream.range(0, 10).grouped(3).toArray()
+   * // => [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
    */
   grouped(size: number): Stream<A[]> {
     return this.chunked(size).chunks().map(c => c.toArray())
   }
 
   /**
-   * Apply a sliding window over the stream and return the windows as groups of elements, with the last group possibly 
+   * Apply a sliding window over the stream and return the windows as groups of elements, with the last group possibly
    * smaller than requested due to end-of-stream.
-   * 
+   *
    * @param n The window size. Must be positive.
    * @param step The step size. Must be positive.
+   *
+   * @example
+   *
+   * await Stream.range(0, 8).sliding(3, 2).toArray()
+   * // => [[0, 1, 2], [2, 3, 4], [4, 5, 6], [6, 7]]
    */
   sliding(n: number, step: number = 1): Stream<A[]> {
-    return Stream.createSimple<A[]>(async push => {
+    return Stream.create<A[]>(async push => {
       let acc: A[] = []
       let count = 0
       const cont2 = await this.foreach0(async a => {
@@ -310,7 +381,7 @@ export abstract class Stream<A> {
   }
 
   chunks(): Stream<Chunk<A>> {
-    return Stream.createSimple(this.foreachChunks)
+    return Stream.create(this.foreachChunks)
   }
 
   mapAsync<B>(f: (a: A) => Promise<B>, parallelism: number = 1): Stream<B> {
@@ -343,7 +414,7 @@ export abstract class Stream<A> {
   }
 
   zipAllWith<B, C>(stream: Stream<B>, f: (a: A | undefined, b: B | undefined) => C | undefined): Stream<C> {
-    return Stream.createSimple<C>(push => {
+    return Stream.create<C>(push => {
       async function takeToOption<AA>(take: Promise<Take<AA>>): Promise<AA | undefined> {
         const result = await take
         return result.fold(
@@ -384,6 +455,12 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   *
+   * @param queue
+   *
+   * @private
+   */
   toQueue(queue: QueueWriter<A>): Promise<void> {
     return this.foreach0(async a => {
       await queue.offerIfNotClosed(a)
@@ -391,6 +468,12 @@ export abstract class Stream<A> {
     }).then(() => {})
   }
 
+  /**
+   *
+   * @param queue
+   *
+   * @private
+   */
   toChunkQueue(queue: QueueWriter<Chunk<A>>): Promise<void> {
     return this.foreachChunks(async chunk => {
       await queue.offerIfNotClosed(chunk)
@@ -398,6 +481,12 @@ export abstract class Stream<A> {
     }).then(() => {})
   }
 
+  /**
+   *
+   * @param options
+   *
+   * @private
+   */
   asQueue(options: BufferAllOptions<A> = {}): Managed<QueueReader<Take<A>>> {
     return enumeratorToQueue(queue => this.toQueue(queue), options)
   }
@@ -430,7 +519,7 @@ export abstract class Stream<A> {
   }
 
   concat<B>(stream: Stream<B>): Stream<A | B> {
-    return Stream.create(async push => {
+    return Stream.createChunked(async push => {
       const cont = await this.foreachChunks(push)
       if (cont) {
         return stream.foreachChunks(push)
@@ -441,7 +530,7 @@ export abstract class Stream<A> {
   }
 
   repeat(): Stream<A> {
-    return Stream.create(async push => {
+    return Stream.createChunked(async push => {
       let cont = true
       while (cont) {
         cont = await this.foreachChunks(push)
@@ -454,7 +543,7 @@ export abstract class Stream<A> {
     const cost = opts.elements || opts.cost || 1
     const maximumBurst = opts.maximumBurst || cost
     const { costCalculation = () => 1, failOnPressure = false } = opts
-    return Stream.createSimple(async push => {
+    return Stream.create(async push => {
       const bucket = new Semaphore(maximumBurst, cost)
       const timer = setInterval(() => bucket.release(cost), duration)
       return bracket(
@@ -499,24 +588,27 @@ export abstract class Stream<A> {
    * Send a last element when an error occurred and gracefully complete the stream.
    */
   recover<B>(f: (err: any) => B): Stream<A | B> {
-    return Stream.create(push => this.foreachChunks(push).catch(err => push(Chunk.singleton(f(err)))))
+    return Stream.createChunked(push => this.foreachChunks(push).catch(err => push(Chunk.singleton(f(err)))))
   }
 
   /**
-   * Switch to alternative `Stream` when an error occurred. 
-   *  It will stay in effect after an error has been recovered up to `attempts` number of times s
+   * Switch to alternative `Stream` when an error occurred.
+   *
+   * It will stay in effect after an error has been recovered up to `attempts` number of times s
    * o that each time there is an error, it is fed into the `f` and a new Stream is started.
+   *
+   * Toto titi
    */
   recoverWithRetries<B>(attempts: number, f: (err: any) => Stream<B>): Stream<A | B> {
     if (attempts > 0) {
-      return Stream.create(push => this.foreachChunks(push).catch(err => f(err).recoverWithRetries(attempts - 1, f).foreachChunks(push)))
+      return Stream.createChunked(push => this.foreachChunks(push).catch(err => f(err).recoverWithRetries(attempts - 1, f).foreachChunks(push)))
     } else {
       return this
     }
   }
 
   onTerminate(f: () => P<void>): Stream<A> {
-    return Stream.create(push => bracket(() => this.foreachChunks(chunk => push(chunk)), f))
+    return Stream.createChunked(push => bracket(() => this.foreachChunks(chunk => push(chunk)), f))
   }
 
   tap(f: (a: A) => void): Stream<A> {
@@ -548,7 +640,7 @@ export abstract class Stream<A> {
         chan.resolve([
           result,
           Stream.from(resp.toArray())
-            .concat(Stream.create(push => readQueue(queue, push)))
+            .concat(Stream.createChunked(push => readQueue(queue, push)))
             .onTerminate(() => streamEnd.resolve()),
         ])
         await streamEnd.promise
@@ -558,7 +650,7 @@ export abstract class Stream<A> {
   }
 
   transduce<R>(consumer: Consumer<A, R>): Stream<R> {
-    return Stream.createSimple(async push => {
+    return Stream.create(async push => {
       let iteratee = consumer.iteratee()
       const cont2 = await this.foreachChunks(async chunk => {
         let resp = await iteratee.update(chunk)
@@ -633,7 +725,7 @@ export abstract class Stream<A> {
   }
 
   private unchunked(): Stream<A> {
-    return Stream.createSimple(push => {
+    return Stream.create(push => {
       return this.foreachChunks(async chunk => {
         for (const a of chunk) {
           const cont = await push(a)
@@ -647,7 +739,7 @@ export abstract class Stream<A> {
   private simplePipe<B>(
     f: (push: (chunk: Chunk<B>) => P<boolean>) => (chunk: Chunk<A>) => P<boolean>,
   ): Stream<B> {
-    return Stream.create(push => this.foreachChunks(f(push)))
+    return Stream.createChunked(push => this.foreachChunks(f(push)))
   }
 }
 
@@ -659,11 +751,11 @@ class StreamImpl<A> extends Stream<A> {
 
 export namespace Stream {
   export function empty<A>(): Stream<A> {
-    return create(async () => true)
+    return createChunked(async () => true)
   }
 
   export function single<A>(a: A): Stream<A> {
-    return createSimple(async push => push(a))
+    return create(async push => push(a))
   }
 
   export function repeat<A>(a: A): Stream<A> {
@@ -671,11 +763,11 @@ export namespace Stream {
   }
 
   export function from<A>(array: A[]): Stream<A> {
-    return create(async push => push(Chunk.seq(array)))
+    return createChunked(async push => push(Chunk.seq(array)))
   }
 
   export function fromPromise<A>(p: () => Promise<A>): Stream<A> {
-    return createSimple(push => p().then(push))
+    return create(push => p().then(push))
   }
 
   export function range(start: number, end: number, increment: number = 1): Stream<number> {
@@ -691,7 +783,7 @@ export namespace Stream {
   }
 
   export function unfoldAsync<S, A>(s: S, cont: (s: S) => boolean, f: (s: S) => P<[S, A]>) {
-    return createSimple(async (push: (a: A) => P<boolean>) => {
+    return create(async (push: (a: A) => P<boolean>) => {
       let state = s
       let sinkCont = true
       while (cont(state) && sinkCont) {
@@ -704,7 +796,7 @@ export namespace Stream {
   }
 
   export function fromIterator<A>(it: () => Iterator<A>): Stream<A> {
-    return createSimple(async (push: (a: A) => P<boolean>) => {
+    return create(async (push: (a: A) => P<boolean>) => {
       const iterator = it()
       let done = false
       let cont = true
@@ -720,7 +812,7 @@ export namespace Stream {
   }
 
   export function fromAsyncIterator<A>(it: () => AsyncIterator<A>): Stream<A> {
-    return createSimple(async (push: (a: A) => P<boolean>) => {
+    return create(async (push: (a: A) => P<boolean>) => {
       const iterator = it()
       let done = false
       let cont = true
@@ -736,21 +828,34 @@ export namespace Stream {
   }
 
   export function lazy<A>(f: () => Stream<A>): Stream<A> {
-    return create(push => f().foreachChunks(push))
+    return createChunked(push => f().foreachChunks(push))
   }
 
   export function failed<A = never>(err: any): Stream<A> {
-    return create<A>(() => Promise.reject(err))
+    return createChunked<A>(() => Promise.reject(err))
   }
 
-  export function createSimple<A>(foreach: (push: (a: A) => P<boolean>) => Promise<boolean>): Stream<A> {
-    return create(push => foreach(a => push(Chunk.singleton(a))))
+  export function create<A>(foreach: (push: (a: A) => P<boolean>) => Promise<boolean>): Stream<A> {
+    return createChunked(push => foreach(a => push(Chunk.singleton(a))))
   }
 
-  export function create<A>(foreach: (push: (a: Chunk<A>) => P<boolean>) => Promise<boolean>): Stream<A> {
+  /**
+   *
+   * @param foreach
+   *
+   * @private
+   */
+  export function createChunked<A>(foreach: (push: (a: Chunk<A>) => P<boolean>) => Promise<boolean>): Stream<A> {
     return new StreamImpl(foreach)
   }
 
+  /**
+   *
+   * @param foreach
+   * @param queueOptions
+   *
+   * @private
+   */
   export function createSimpleConcurrent<A>(
     foreach: (queue: QueueWriter<A>) => Promise<void>,
     queueOptions: { capacity?: number, overflowStrategy?: OverflowStrategy } = {},
@@ -761,12 +866,14 @@ export namespace Stream {
   /**
    * Like Stream.create, but allow concurrent emitions
    * @param foreach
+   *
+   * @private
    */
   export function createConcurrent<A>(
     foreach: (queue: QueueWriter<Chunk<A>>) => Promise<void>,
     queueOptions: BufferAllOptions<Chunk<A>> = {},
   ): Stream<A> {
-    return create(push => enumeratorToQueue(foreach, queueOptions).use(queue => readQueue(queue, push)))
+    return createChunked(push => enumeratorToQueue(foreach, queueOptions).use(queue => readQueue(queue, push)))
   }
 
   export function merge<A, B>(s1: Stream<A>, s2: Stream<B>): Stream<A | B>

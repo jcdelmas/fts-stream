@@ -36,7 +36,7 @@ function nodeReadableStreamToStream<S extends ReadableStream, O extends Buffer |
   streamFactory: () => S,
   close: (stream: S) => void = () => {},
 ): Stream<O> {
-  return Stream.createSimple(push => {
+  return Stream.create(push => {
     async function waitAndRead(readable: S): Promise<boolean> {
       return new Promise<boolean>((resolve, reject) => {
         readable.on('error', reject)

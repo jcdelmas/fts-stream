@@ -6,20 +6,28 @@
   "scripts": {
     "watch": "tsc -w",
     "test": "jest",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist docs/generated",
     "lint": "tslint -p tsconfig.json",
     "build": "tsc",
-    "prepublishOnly": "yarn run clean && yarn run lint && yarn run test && yarn run build"
+    "prepublishOnly": "yarn run clean && yarn run lint && yarn run test && yarn run build",
+    "docs": "yarn run docs:api && yarn run docz:build",
+    "docs:api": "node tasks/docs.js",
+    "docz:dev": "docz dev",
+    "docz:build": "docz build"
   },
   "devDependencies": {
     "@types/jest": "^23.3.10",
     "@types/lodash": "^4.14.119",
     "@types/node": "^11.13.6",
+    "docz": "^1.2.0",
+    "docz-theme-default": "^1.2.0",
+    "handlebars": "^4.1.2",
     "highland": "^2.13.4",
     "jest": "^24.7.1",
     "lodash": "^4.17.11",
     "ts-jest": "^24.0.2",
     "tslint": "^5.16.0",
+    "typedoc": "^0.14.2",
     "typescript": "^3.4.4"
   },
   "jest": {

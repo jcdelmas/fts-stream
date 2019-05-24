@@ -1,5 +1,8 @@
 .idea
+.temp
+.docz
 dist
 node_modules
+/docs/generated
 /coverage
 .DS_Store
