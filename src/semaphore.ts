@@ -4,6 +4,7 @@ export class Semaphore {
 
   private pending: [number, () => void][] = []
 
+  // TODO: add an option to forbid acquiring more than `max`
   constructor(readonly max: number, init?: number) {
     this.current = init !== undefined ? init : max
   }
@@ -30,7 +31,8 @@ export class Semaphore {
   }
 
   release(n: number = 1): void {
-    this.current = Math.min(this.current + n, this.max)
+    const max = this.pending.length > 0 ? Math.max(this.pending[0][0], this.max) : this.max;
+    this.current = Math.min(this.current + n, max)
     if (this.pending.length > 0) {
       const [take, resolve] = this.pending[0]
       if (take <= this.current) {

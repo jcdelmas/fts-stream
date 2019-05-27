@@ -16,7 +16,7 @@ describe('files', () => {
       .map(() => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\n')
       .to(writeTextFile(filePath))
     await delay(500)
-    const result = await readTextFile(filePath).fold(0, (sum, str) => sum + str.length)
+    const result = await readTextFile(filePath).reduce(0, (sum, str) => sum + str.length)
     expect(result).toEqual(lines * 64)
 
   })
@@ -29,7 +29,7 @@ describe('files', () => {
     await Stream.range(1, lines)
       .map(() => Buffer.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\n', 'utf8'))
       .to(writeBinaryFile(filePath))
-    const result = await readBinaryFile(filePath).fold(0, (sum, str) => sum + str.length)
+    const result = await readBinaryFile(filePath).reduce(0, (sum, str) => sum + str.length)
     expect(result).toEqual(lines * 64)
   })
 })

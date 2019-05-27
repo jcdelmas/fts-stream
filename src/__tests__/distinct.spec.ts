@@ -19,6 +19,11 @@ describe('distinct', () => {
         expect(result).toEqual([1, 2, 1])
     })
 
+    test('=== comparison', async () => {
+        const result = await Stream.from([1, 1, '1', 1, 2, 0, false, false]).distinct().toArray()
+        expect(result).toEqual([1, '1', 1, 2, 0, false])
+    })
+
     test('singleton', async () => {
         const result = await Stream.single(1).distinct().toArray()
         expect(result).toEqual([1])

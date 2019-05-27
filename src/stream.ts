@@ -14,28 +14,41 @@ export type Sink<I, O> = (s: Stream<I>) => Promise<O>
 export abstract class Stream<A> {
 
   /**
-   *
-   * @param push
-   *
    * @private
    */
   abstract foreachChunks(push: (as: Chunk<A>) => P<boolean>): Promise<boolean>
 
-  foreach(push: (a: A) => void): Promise<void> {
+  /**
+   * Iterates over every element from the Stream, calling the function `f` on each of them,
+   * and return a `Promise` which resolve when the Stream terminates.
+   *
+   * If an error occurred the `Promise` wil fail.
+   *
+   * @param f
+   *
+   * @example
+   *
+   * const items = [];
+   * await Stream.range(0, 4).foreach(i => items.push(i));
+   * console.log(items);
+   * // => [0, 1, 2, 3]
+   */
+  foreach(f: (a: A) => void): Promise<void> {
     return this.foreachChunks(chunk => {
-      for (const x of chunk) push(x)
+      for (const x of chunk) f(x)
       return true
     }).then(() => {})
   }
 
+  /**
+   * Run the Stream ignoring all the elements, and return a `Promise` which resolve
+   * when the Stream terminates, or fail if an error occurred.
+   */
   run(): Promise<void> {
     return this.foreach(() => {})
   }
 
   /**
-   *
-   * @param push
-   *
    * @private
    */
   foreach0(push: (a: A) => P<boolean>): Promise<boolean> {
@@ -48,8 +61,22 @@ export abstract class Stream<A> {
     })
   }
 
-  fold<S>(s0: S, f: (s: S, a: A) => S): Promise<S> {
-    return this.foldChunks(s0, (s, chunk) => {
+  /**
+   * The given function `f` is invoked for every received element, giving it its previous output
+   * (or the given `zero` value) and the element as input. The returned `Promise` will be completed
+   * with value of the final function evaluation when the input stream ends, or completed with failure
+   * if there is an error signaled in the stream.
+   *
+   * @param zero Initial value
+   * @param f The reducer function
+   *
+   * @example
+   *
+   * await Stream.from(1, 2, 3, 4, 5).reduce(0, (acc, x) => acc + x)
+   * // => 15
+   */
+  reduce<S>(zero: S, f: (s: S, a: A) => S): Promise<S> {
+    return this.reduceChunks(zero, (s, chunk) => {
       for (const a of chunk) {
         s = f(s, a)
       }
@@ -59,13 +86,13 @@ export abstract class Stream<A> {
 
   /**
    *
-   * @param s0
+   * @param zero
    * @param f
    *
    * @private
    */
-  foldChunks<S>(s0: S, f: (s: S, as: Chunk<A>) => S): Promise<S> {
-    let s = s0
+  reduceChunks<S>(zero: S, f: (s: S, as: Chunk<A>) => S): Promise<S> {
+    let s = zero
     return this.foreachChunks(async chunk => {
       s = f(s, chunk)
       return true
@@ -84,16 +111,38 @@ export abstract class Stream<A> {
     return this.simplePipe(push => chunk => push(chunk.map(f)))
   }
 
+  /**
+   * Transform each input element into a Stream of output elements that is then flattened into the
+   * output Stream by concatenation, fully consuming one Stream after the other.
+   *
+   * @param f The transformation function
+   *
+   * @example
+   *
+   * await Stream(1, 2, 3).flatMap(i => Stream.repeat(i).take(i)).toArray()
+   * // => [1, 2, 2, 3, 3, 3]
+   */
   flatMap<B>(f: (a: A) => Stream<B>): Stream<B> {
     return Stream.createChunked(push => this.foreach0(a => f(a).foreachChunks(push)))
   }
 
+  /**
+   * Transform each input element into an array of output elements that is
+   * then flattened into the output stream.
+   *
+   * @param f The transformation function
+   *
+   * @example
+   *
+   * await Stream(1, 2, 3).mapConcat(i => [i, i]).toArray()
+   * // => [1, 1, 2, 2, 3, 3]
+   */
   mapConcat<B>(f: (a: A) => B[]): Stream<B> {
     return Stream.createChunked(push => this.foreach0(a => push(Chunk.seq(f(a)))))
   }
 
   /**
-   * Emits only inputs which match the supplied predicate.
+   * Create a new Stream which emits only elements from the source Stream which match the supplied predicate.
    *
    * @param f The predicate function
    *
@@ -110,7 +159,16 @@ export abstract class Stream<A> {
   }
 
   /**
-   * Like `filter`, but the predicate `f` depends on the previously emitted and current elements.
+   * Like [`filter`](#filter), but the predicate `f` depends on the previously emitted and current elements.
+   *
+   * @param f The predicate function
+   *
+   * @example
+   *
+   * await Stream(1, -1, 2, -2, 3, -3, 4, -4)
+   *    .filterWithPrevious((previous, current) => previous < current)
+   *    .toArray()
+   * // => [1, 2, 3, 4]
    */
   filterWithPrevious(f: (prev: A, cur: A) => boolean): Stream<A> {
     return Stream.create(async push => {
@@ -137,7 +195,7 @@ export abstract class Stream<A> {
   }
 
   /**
-   * Emits the first n elements of this stream.
+   * Emits the first `n` elements of this Stream.
    *
    * @param n The number of elements
    *
@@ -162,7 +220,7 @@ export abstract class Stream<A> {
   }
 
   /**
-   * Emits the longest prefix of the input for which all elements test `true` according to `f`.
+   * Emits elements from the head of this Stream until the supplied predicate returns `false`.
    *
    * @param f Predicate
    *
@@ -180,9 +238,9 @@ export abstract class Stream<A> {
   }
 
   /**
-   * Drops `n` first elements of the input, then echoes the rest.
+   * Drops the `n` first elements of the input Stream, and then emits the rest.
    *
-   * @param n Number of elements to drop
+   * @param n The number of elements to drop
    *
    * @example
    *
@@ -211,9 +269,9 @@ export abstract class Stream<A> {
   }
 
   /**
-   * Drops elements from the head of this stream until the supplied predicate returns `false`.
+   * Drops elements from the head of this Stream until the supplied predicate returns `false`.
    *
-   * @param f Predicate
+   * @param f The predicate function
    *
    * @example
    *
@@ -238,6 +296,18 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Return a new Stream which emits its current value which starts at `zero` and then applies the current
+   * and next value to the given function `f`, emitting the next current value.
+   *
+   * @param zero Initial value
+   * @param f Transformation function
+   *
+   * @example
+   *
+   * await Stream.from(1, 2, 3, 4).scan(0, (acc, x) => acc + x).toArray()
+   * // => [0, 1, 3, 6, 10]
+   */
   scan<S>(zero: S, f: (s: S, a: A) => S): Stream<S> {
     return Stream.single(zero).concat(this.mapAccum(zero, (s, a) => {
       const s2 = f(s, a)
@@ -245,6 +315,19 @@ export abstract class Stream<A> {
     }))
   }
 
+  /**
+   * Transform this Stream by applying the function `f` to the current state (which starts at `zero`)
+   * and the input value. The function must return a tuple containing the new state and the element
+   * to emit.
+   *
+   * @param zero Initial state
+   * @param f Transformation function
+   *
+   * @example
+   *
+   * await Stream.from("Hello", "World").mapAccum(0, (l, s) => (l + s.length, s[0])).toArray()
+   * // => [[5, 'H'], [10, 'W']]
+   */
   mapAccum<B, S>(zero: S, f: (s: S, a: A) => [S, B]): Stream<B> {
     return this.simplePipe(push => {
       let state = zero
@@ -256,10 +339,28 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Return a Stream of tuples consisting of all input elements paired with their index. Indices start at 0.
+   *
+   * @example
+   *
+   * await Stream.from('Lorem', 'ipsum', 'dolor', 'sit', 'amet').zipWithIndex().toArray()
+   * // => [['Lorem', 0], ['ipsum', 1], ['dolor', 2], ['sit', 3], ['amet', 4]]
+   */
   zipWithIndex(): Stream<[A, number]> {
     return this.mapAccum<[A, number], number>(0, (i, a) => [i + 1, [a, i]])
   }
 
+  /**
+   * Emits the specified `separator` between every pair of elements in the source stream.
+   *
+   * @param separator
+   *
+   * @example
+   *
+   * await Stream.from(1, 2, 3, 4, 5).intersperse(0).toArray()
+   * // => [1, 0, 2, 0, 3, 0, 4, 0, 5]
+   */
   intersperse<B>(separator: B): Stream<A | B> {
     return this.simplePipe(push => {
       let first = true
@@ -300,6 +401,8 @@ export abstract class Stream<A> {
    * Behaves like the identity function, but requests `chunkSize` elements at a time from the input.
    *
    * @param chunkSize The size of the chunks
+   *
+   * @private
    */
   chunked(chunkSize: number): Stream<A> {
     return Stream.createChunked(async push => {
@@ -376,14 +479,33 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Emits only elements that are distinct from their immediate predecessors,
+   * using `===` operator for comparison.
+   */
   distinct(): Stream<A> {
-    return this.filterWithPrevious((prev, current) => prev != current)
+    return this.filterWithPrevious((prev, current) => prev !== current)
   }
 
+  /**
+   * @private
+   */
   chunks(): Stream<Chunk<A>> {
     return Stream.create(this.foreachChunks)
   }
 
+  /**
+   * Transform this stream by applying the given function `f` to each of the elements as they pass
+   * through this processing step. The function returns a `Promise` and the value of that promise will
+   * be emitted downstream. The number of Promises that can run in parallel is given as the
+   * `parallelism` argument.
+   *
+   * These Promises may complete in any order, but the elements that are
+   * emitted downstream are in the same order as received from upstream.
+   *
+   * @param f The transformation function
+   * @param parallelism The number of Promises that can run in parallel
+   */
   mapAsync<B>(f: (a: A) => Promise<B>, parallelism: number = 1): Stream<B> {
     if (parallelism === 1) {
       return this.flatMap(a => Stream.fromPromise(() => f(a)))
@@ -399,14 +521,50 @@ export abstract class Stream<A> {
     }
   }
 
+  /**
+   * Transform this stream by applying the given function `f` to each of the elements as they pass
+   * through this processing step. The function returns a `Promise` and the value of that promise will
+   * be emitted downstream. The number of Promises that can run in parallel is given as the
+   * `parallelism` argument.
+   *
+   * Each processed element will be emitted downstream as soon as it is ready, i.e. it is possible
+   * that the elements are not emitted downstream in the same order as received from upstream.
+   *
+   * @param f The transformation function
+   * @param parallelism The number of Promises that can run in parallel
+   */
   mapAsyncUnordered<B>(f: (a: A) => Promise<B>, parallelism: number): Stream<B> {
     return this.flatMapMerge(a => Stream.fromPromise(() => f(a)), parallelism)
   }
 
+  /**
+   * Combine the elements of current and the given stream into a stream of tuples.
+   *
+   * Terminates when any of the streams completes.
+   *
+   * @param stream Stream to zip
+   *
+   * @example
+   *
+   * await Stream.from(1, 2, 3).zip(Stream.from(4, 5, 6, 7)).toArray()
+   * // => [[1, 4], [2, 5], [3, 6]]
+   */
   zip<B>(stream: Stream<B>): Stream<[A, B]> {
     return this.zipWith<B, [A, B]>(stream, (a, b) => [a, b])
   }
 
+  /**
+   * Put together the elements of current and the given streams into a stream of combined elements
+   * using the given `f` function.
+   *
+   * @param stream Stream to zip with
+   * @param f Combiner function
+   *
+   * @example
+   *
+   * await Stream.from(1, 2, 3).zipWith(Stream.from(4, 5, 6, 7), (l, r) => l + r).toArray()
+   * // => [5, 7, 9]
+   */
   zipWith<B, C>(stream: Stream<B>, f: (a: A, b: B) => C): Stream<C> {
     return this.zipAllWith(stream, (a, b) => {
       return a !== undefined && b !== undefined ? f(a, b) : undefined
@@ -456,9 +614,6 @@ export abstract class Stream<A> {
   }
 
   /**
-   *
-   * @param queue
-   *
    * @private
    */
   toQueue(queue: QueueWriter<A>): Promise<void> {
@@ -491,10 +646,24 @@ export abstract class Stream<A> {
     return enumeratorToQueue(queue => this.toQueue(queue), options)
   }
 
+  /**
+   * Merge the given Stream to the current one, taking elements as they arrive from input streams,
+   * picking randomly when several elements ready.
+   *
+   * @param stream The stream to merge with current one
+   */
   merge<B>(stream: Stream<B>): Stream<A | B> {
     return Stream.merge(this, stream)
   }
 
+  /**
+   *
+   * Transform each input element into a Stream of output elements that is then flattened into
+   * the output stream by merging, where at most `parallelism` substreams are being consumed at any given time.
+   *
+   * @param f The transformation funcrion
+   * @param parallelism The number of substreams that can be consumed at a given time
+   */
   flatMapMerge<B>(f: (a: A) => Stream<B>, parallelism: number): Stream<B> {
     return Stream.createConcurrent<B>(queue => {
       return this.mapAsync(async a => {
@@ -506,18 +675,47 @@ export abstract class Stream<A> {
     })
   }
 
-  pipe<B>(flow: Pipe<A, B>): Stream<B> {
-    return flow(this)
+  /**
+   * Transform this Stream with the given Pipe
+   *
+   * @param pipe Pipe to apply to the Stream
+   */
+  pipe<B>(pipe: Pipe<A, B>): Stream<B> {
+    return pipe(this)
   }
 
+  /**
+   * Run this Stream with the given Sink
+   *
+   * @param sink Sink to run the Stream with
+   */
   to<R>(sink: Sink<A, R>): Promise<R> {
     return sink(this)
   }
 
+  /**
+   * Return all the emitted elements in an array
+   *
+   * @example
+   *
+   * await Stream.from(1, 2, 3).toArray()
+   * // => [1, 2, 3]
+   */
   toArray(): Promise<A[]> {
-    return this.foldChunks<A[]>([], (s, a) => s.concat(a.toArray()))
+    return this.reduceChunks<A[]>([], (s, a) => s.concat(a.toArray()))
   }
 
+  /**
+   * Concatenates the current Stream with the given Stream `stream` so the first element emitted
+   * by that stream is emitted after the last element of the current stream.
+   *
+   * @param stream The stream to append to the current stream
+   *
+   * @example
+   *
+   * await Stream.from(1, 2, 3).concat(Stream.from(4, 5, 6)).toArray()
+   * // => [1, 2, 3, 4, 5, 6]
+   */
   concat<B>(stream: Stream<B>): Stream<A | B> {
     return Stream.createChunked(async push => {
       const cont = await this.foreachChunks(push)
@@ -529,6 +727,14 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Repeat the current stream indefintely.
+   *
+   * @example
+   *
+   * await Stream.from(1, 2, 3).repeat().take(10).toArray()
+   * // => [1, 2, 3, 1, 2, 3, 1, 2, 3, 1]
+   */
   repeat(): Stream<A> {
     return Stream.createChunked(async push => {
       let cont = true
@@ -539,6 +745,24 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   *
+   * Sends elements downstream with speed limited to `cost`/`duration` or `elements`/`duration`.
+   *
+   * Cost is calculating for each element individually by calling `costCalculation` function.
+   * If no `costCalculation` is provided, the `cost` for each element is `1`.
+   *
+   * Throttle implements the token bucket model. There is a bucket with a given token capacity
+   * (burst size or `maximumBurst`). Tokens drops into the bucket at a given rate and can be
+   * spared for later use up to bucket capacity to allow some burstiness. Whenever stream wants
+   * to send an element, it takes as many tokens from the bucket as element costs. If there isn't
+   * any, throttle waits until the bucket accumulates enough tokens. Elements that costs more than
+   * the allowed burst will be delayed proportionally to their cost minus available tokens, meeting
+   * the target rate. Bucket is full when stream just materialized and started.
+   *
+   * @param duration
+   * @param opts
+   */
   throttle(duration: number, opts: ThrottleOptions<A> = {}): Stream<A> {
     const cost = opts.elements || opts.cost || 1
     const maximumBurst = opts.maximumBurst || cost
@@ -563,6 +787,11 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   * Debounce the stream with a minimum period of `duration` between each element.
+   *
+   * @param duration Minimum period between elements
+   */
   debounce(duration: number): Stream<A> {
     return Stream.createSimpleConcurrent(queue => {
       let lastTimer: NodeJS.Timeout | undefined
@@ -586,6 +815,16 @@ export abstract class Stream<A> {
 
   /**
    * Send a last element when an error occurred and gracefully complete the stream.
+   *
+   * @param f The recover function
+   *
+   * @example
+   *
+   * await Stream.from('Hello', 'World')
+   *    .concat(Stream.failed(new Error('Failure')))
+   *    .recover(e => e.message)
+   *    .toArray()
+   * // => ['Hello', 'World', 'Failure']
    */
   recover<B>(f: (err: any) => B): Stream<A | B> {
     return Stream.createChunked(push => this.foreachChunks(push).catch(err => push(Chunk.singleton(f(err)))))
@@ -594,10 +833,10 @@ export abstract class Stream<A> {
   /**
    * Switch to alternative `Stream` when an error occurred.
    *
-   * It will stay in effect after an error has been recovered up to `attempts` number of times s
-   * o that each time there is an error, it is fed into the `f` and a new Stream is started.
+   * It will stay in effect after an error has been recovered up to `attempts` number of times
+   * so that each time there is an error, it is fed into the `f` and a new Stream is started.
    *
-   * Toto titi
+   * @private
    */
   recoverWithRetries<B>(attempts: number, f: (err: any) => Stream<B>): Stream<A | B> {
     if (attempts > 0) {
@@ -607,10 +846,38 @@ export abstract class Stream<A> {
     }
   }
 
-  onTerminate(f: () => P<void>): Stream<A> {
-    return Stream.createChunked(push => bracket(() => this.foreachChunks(chunk => push(chunk)), f))
+  /**
+   * Provide a function `f` that will be called when the current stream will terminate.
+   * If the stream terminate with an error, the error is sent to the callback function.
+   *
+   * @private
+   */
+  onTerminate(f: (err: any | undefined, isComplete: boolean) => P<void>): Stream<A> {
+    return Stream.createChunked(push => this.foreachChunks(push).then(
+      cont => {
+        f(undefined, cont)
+        return cont
+      },
+      err => {
+        f(err, true)
+        throw err
+      }
+    ))
   }
 
+  /**
+   * Provide a function `f` that will be called for each emitted element without affecting the current
+   * Stream.
+   *
+   * @param f The callback function
+   *
+   * @example
+   *
+   * const items: number[] = []
+   * await Stream.range(0, 100).tap(x => items.push(x)).take(5).run()
+   * console.log(items)
+   * // => [0, 1, 2, 3, 4]
+   */
   tap(f: (a: A) => void): Stream<A> {
     return this.map(a => {
       f(a)
@@ -618,6 +885,12 @@ export abstract class Stream<A> {
     })
   }
 
+  /**
+   *
+   * @param consumer
+   *
+   * @private
+   */
   async peel<R>(consumer: Consumer<A, R>): Promise<[R, Stream<A>]> {
     const chan = promiseChannel<[R, Stream<A>]>()
     this.chunks().asQueue().use(async queue => {
@@ -649,6 +922,12 @@ export abstract class Stream<A> {
     return chan.promise
   }
 
+  /**
+   *
+   * @param consumer
+   *
+   * @private
+   */
   transduce<R>(consumer: Consumer<A, R>): Stream<R> {
     return Stream.create(async push => {
       let iteratee = consumer.iteratee()
@@ -673,14 +952,39 @@ export abstract class Stream<A> {
     })
   }
 
-  debug(prefix: string): Stream<A> {
-    return this.tap(a => console.debug(`${new Date().toISOString()} - ${prefix} - ${a}`))
+  /**
+   * Logs elements flowing through the stream as well as completion and erroring.
+   *
+   * @param name Name appearing in the message
+   * @param extract Optional transformation to apply to each elements before log
+   */
+  log(name: string, extract: (a: A) => any = a => a): Stream<A> {
+    const log = (...args: any[]) => console.debug(`${new Date().toISOString()} - ${name} -`, ...args)
+    return this.tap(a => log(extract(a)))
+      .onTerminate((err, isCompleted) => {
+        if (err) {
+          log('[FAILURE]', err)
+          return
+        }
+        log(isCompleted ? '[COMPLETED]' : '[CANCELLED]')
+      })
   }
 
+  /**
+   * @private
+   */
   broadcast(): Stream<Stream<A>> {
     return this.pipe(broadcast<A>())
   }
 
+  /**
+   * Broadcasts all emitted elements of the current Stream to the `sinks`, and returns a
+   * `Promise` which resolve when all the sinks are terminated.
+   *
+   * Terminates when the current Stream completes, or when all the sinks are terminated.
+   *
+   * @param sinks The sinks to broadcast
+   */
   broadcastTo(...sinks: Sink<A, void>[]): Promise<void> {
     return this.broadcast()
       .take(sinks.length)
@@ -698,6 +1002,15 @@ export abstract class Stream<A> {
   //   })
   // }
 
+  /**
+   * Broadcasts all emitted elements of the current Stream through the `pipes`, and returns
+   * a new Stream merging all the elements emitted by those pipes.
+   *
+   * Terminates if the current Stream completes, if all the pipes are terminated,
+   * or if the downstream sink is terminates.
+   *
+   * @param sinks The sinks to broadcast
+   */
   broadcastThrough<B>(...pipes: Pipe<A, B>[]): Stream<B> {
     return this.broadcast()
       .take(pipes.length)

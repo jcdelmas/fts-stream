@@ -64,6 +64,19 @@ describe('throttle', () => {
     checkTime(result[4], 300)
     checkTime(result[5], 400)
   })
+  it('with cost higher than maximum burst', async () => {
+    const startTime = new Date().getTime()
+    const result = await Stream.from([
+      'a', 'ab', 'abc'
+    ])
+      .throttle(100, { costCalculation: x => x.length })
+      .map(() => new Date().getTime() - startTime)
+      .toArray()
+    expect(result).toHaveLength(3)
+    checkTime(result[0], 0)
+    checkTime(result[1], 200)
+    checkTime(result[2], 500)
+  });
   it('with failOnPressure', async () => {
     const promise = TimedStream.of([
       [0, 1],
