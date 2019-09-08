@@ -6,13 +6,12 @@ import { Managed, ManagedImpl } from './managed'
 import { bracket, promiseChannel } from './promises'
 import { OverflowStrategy, Queue, QueueReader, QueueWriter } from './queue'
 import { Semaphore } from './semaphore'
-import { P } from './helpers';
+import { P } from './helpers'
 
 export type Pipe<I, O> = (s: Stream<I>) => Stream<O>
 export type Sink<I, O> = (s: Stream<I>) => Promise<O>
 
 export abstract class Stream<A> {
-
   /**
    * @private
    */
@@ -252,7 +251,7 @@ export abstract class Stream<A> {
       let remaining = n
       let ok = false
       return async chunk => {
-        if (ok) {
+        if (ok) {
           return push(chunk)
         } else if (remaining > chunk.size) {
           remaining -= chunk.size
@@ -309,10 +308,12 @@ export abstract class Stream<A> {
    * // => [0, 1, 3, 6, 10]
    */
   scan<S>(zero: S, f: (s: S, a: A) => S): Stream<S> {
-    return Stream.single(zero).concat(this.mapAccum(zero, (s, a) => {
-      const s2 = f(s, a)
-      return [s2, s2]
-    }))
+    return Stream.single(zero).concat(
+      this.mapAccum(zero, (s, a) => {
+        const s2 = f(s, a)
+        return [s2, s2]
+      }),
+    )
   }
 
   /**
@@ -392,8 +393,8 @@ export abstract class Stream<A> {
    * @param size The size of the buffer
    */
   buffer(size: number = 256, options: BufferOptions<A> = {}): Stream<A> {
-    return Stream.create(
-      push => this.asQueue({ capacity: size, ...options }).use(queue => readQueue(queue, push)),
+    return Stream.create(push =>
+      this.asQueue({ capacity: size, ...options }).use(queue => readQueue(queue, push)),
     )
   }
 
@@ -438,7 +439,9 @@ export abstract class Stream<A> {
    * // => [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
    */
   grouped(size: number): Stream<A[]> {
-    return this.chunked(size).chunks().map(c => c.toArray())
+    return this.chunked(size)
+      .chunks()
+      .map(c => c.toArray())
   }
 
   /**
@@ -510,8 +513,7 @@ export abstract class Stream<A> {
     if (parallelism === 1) {
       return this.flatMap(a => Stream.fromPromise(() => f(a)))
     } else {
-      return this
-        .unchunked()
+      return this.unchunked()
         .map(f)
         .buffer(parallelism - 2, {
           // Avoid warnings due to unhandled promise rejection
@@ -571,18 +573,26 @@ export abstract class Stream<A> {
     })
   }
 
-  zipAllWith<B, C>(stream: Stream<B>, f: (a: A | undefined, b: B | undefined) => C | undefined): Stream<C> {
+  zipAllWith<B, C>(
+    stream: Stream<B>,
+    f: (a: A | undefined, b: B | undefined) => C | undefined,
+  ): Stream<C> {
     return Stream.create<C>(push => {
       async function takeToOption<AA>(take: Promise<Take<AA>>): Promise<AA | undefined> {
         const result = await take
         return result.fold(
           r => r,
           () => undefined,
-          err => { throw err },
+          err => {
+            throw err
+          },
         )
       }
 
-      async function run(leftQueue: QueueReader<Take<A>>, rightQueue: QueueReader<Take<B>>): Promise<boolean> {
+      async function run(
+        leftQueue: QueueReader<Take<A>>,
+        rightQueue: QueueReader<Take<B>>,
+      ): Promise<boolean> {
         let leftDone = false
         let rightDone = false
         let done = false
@@ -609,7 +619,9 @@ export abstract class Stream<A> {
         return cont
       }
 
-      return this.asQueue().use(leftQueue => stream.asQueue().use(rightQueue => run(leftQueue, rightQueue)))
+      return this.asQueue().use(leftQueue =>
+        stream.asQueue().use(rightQueue => run(leftQueue, rightQueue)),
+      )
     })
   }
 
@@ -771,17 +783,18 @@ export abstract class Stream<A> {
       const bucket = new Semaphore(maximumBurst, cost)
       const timer = setInterval(() => bucket.release(cost), duration)
       return bracket(
-        () => this.foreach0(async a => {
-          const itemCost = costCalculation(a)
-          if (failOnPressure) {
-            if (!bucket.ask(itemCost)) {
-              return Promise.reject(new Error('Maximum throttle throughput exceeded.'))
+        () =>
+          this.foreach0(async a => {
+            const itemCost = costCalculation(a)
+            if (failOnPressure) {
+              if (!bucket.ask(itemCost)) {
+                return Promise.reject(new Error('Maximum throttle throughput exceeded.'))
+              }
+            } else {
+              await bucket.acquire(itemCost)
             }
-          } else {
-            await bucket.acquire(itemCost)
-          }
-          return push(a)
-        }),
+            return push(a)
+          }),
         () => clearInterval(timer),
       )
     })
@@ -793,24 +806,26 @@ export abstract class Stream<A> {
    * @param duration Minimum period between elements
    */
   debounce(duration: number): Stream<A> {
-    return Stream.createSimpleConcurrent(queue => {
-      let lastTimer: NodeJS.Timeout | undefined
-      let lastCallback: () => void | undefined
-      return this.foreach0(async a => {
-        if (lastTimer) clearTimeout(lastTimer)
-        lastTimer = setTimeout(() => {
-          lastTimer = undefined
-          queue.offerIfNotClosed(a)
-            .catch((err: any) => console.error(err)) // Should not occurred
-          if (lastCallback) lastCallback()
-        }, duration)
-        return !queue.isClosed
-      }).then(() => {
-        if (lastTimer) {
-          return new Promise<void>(resolve => lastCallback = resolve)
-        }
-      })
-    }, { capacity: 1, overflowStrategy: OverflowStrategy.SLIDING })
+    return Stream.createSimpleConcurrent(
+      queue => {
+        let lastTimer: NodeJS.Timeout | undefined
+        let lastCallback: () => void | undefined
+        return this.foreach0(async a => {
+          if (lastTimer) clearTimeout(lastTimer)
+          lastTimer = setTimeout(() => {
+            lastTimer = undefined
+            queue.offerIfNotClosed(a).catch((err: any) => console.error(err)) // Should not occurred
+            if (lastCallback) lastCallback()
+          }, duration)
+          return !queue.isClosed
+        }).then(() => {
+          if (lastTimer) {
+            return new Promise<void>(resolve => (lastCallback = resolve))
+          }
+        })
+      },
+      { capacity: 1, overflowStrategy: OverflowStrategy.SLIDING },
+    )
   }
 
   /**
@@ -827,7 +842,9 @@ export abstract class Stream<A> {
    * // => ['Hello', 'World', 'Failure']
    */
   recover<B>(f: (err: any) => B): Stream<A | B> {
-    return Stream.createChunked(push => this.foreachChunks(push).catch(err => push(Chunk.singleton(f(err)))))
+    return Stream.createChunked(push =>
+      this.foreachChunks(push).catch(err => push(Chunk.singleton(f(err)))),
+    )
   }
 
   /**
@@ -840,7 +857,13 @@ export abstract class Stream<A> {
    */
   recoverWithRetries<B>(attempts: number, f: (err: any) => Stream<B>): Stream<A | B> {
     if (attempts > 0) {
-      return Stream.createChunked(push => this.foreachChunks(push).catch(err => f(err).recoverWithRetries(attempts - 1, f).foreachChunks(push)))
+      return Stream.createChunked(push =>
+        this.foreachChunks(push).catch(err =>
+          f(err)
+            .recoverWithRetries(attempts - 1, f)
+            .foreachChunks(push),
+        ),
+      )
     } else {
       return this
     }
@@ -853,16 +876,18 @@ export abstract class Stream<A> {
    * @private
    */
   onTerminate(f: (err: any | undefined, isComplete: boolean) => P<void>): Stream<A> {
-    return Stream.createChunked(push => this.foreachChunks(push).then(
-      cont => {
-        f(undefined, cont)
-        return cont
-      },
-      err => {
-        f(err, true)
-        throw err
-      }
-    ))
+    return Stream.createChunked(push =>
+      this.foreachChunks(push).then(
+        cont => {
+          f(undefined, cont)
+          return cont
+        },
+        err => {
+          f(err, true)
+          throw err
+        },
+      ),
+    )
   }
 
   /**
@@ -893,32 +918,38 @@ export abstract class Stream<A> {
    */
   async peel<R>(consumer: Consumer<A, R>): Promise<[R, Stream<A>]> {
     const chan = promiseChannel<[R, Stream<A>]>()
-    this.chunks().asQueue().use(async queue => {
-      const iteratee = consumer.iteratee()
-      let resp: Chunk<A> | Consumer.Cont = Consumer.Cont
-      while (!chan.closed && resp === Consumer.Cont) {
-        const take = await queue.take()
-        await take.fold(
-          async a => { resp = await iteratee.update(a) },
-          async () => {
-            const r = await iteratee.result()
-            chan.resolve([r, Stream.empty()])
-          },
-          async err => { chan.reject(err) },
-        )
-      }
-      if (resp instanceof Chunk && !chan.closed) {
-        const result = await iteratee.result()
-        const streamEnd = promiseChannel<void>()
-        chan.resolve([
-          result,
-          Stream.from(resp.toArray())
-            .concat(Stream.createChunked(push => readQueue(queue, push)))
-            .onTerminate(() => streamEnd.resolve()),
-        ])
-        await streamEnd.promise
-      }
-    })
+    this.chunks()
+      .asQueue()
+      .use(async queue => {
+        const iteratee = consumer.iteratee()
+        let resp: Chunk<A> | Consumer.Cont = Consumer.Cont
+        while (!chan.closed && resp === Consumer.Cont) {
+          const take = await queue.take()
+          await take.fold(
+            async a => {
+              resp = await iteratee.update(a)
+            },
+            async () => {
+              const r = await iteratee.result()
+              chan.resolve([r, Stream.empty()])
+            },
+            async err => {
+              chan.reject(err)
+            },
+          )
+        }
+        if (resp instanceof Chunk && !chan.closed) {
+          const result = await iteratee.result()
+          const streamEnd = promiseChannel<void>()
+          chan.resolve([
+            result,
+            Stream.from(resp.toArray())
+              .concat(Stream.createChunked(push => readQueue(queue, push)))
+              .onTerminate(() => streamEnd.resolve()),
+          ])
+          await streamEnd.promise
+        }
+      })
     return chan.promise
   }
 
@@ -959,15 +990,15 @@ export abstract class Stream<A> {
    * @param extract Optional transformation to apply to each elements before log
    */
   log(name: string, extract: (a: A) => any = a => a): Stream<A> {
-    const log = (...args: any[]) => console.debug(`${new Date().toISOString()} - ${name} -`, ...args)
-    return this.tap(a => log(extract(a)))
-      .onTerminate((err, isCompleted) => {
-        if (err) {
-          log('[FAILURE]', err)
-          return
-        }
-        log(isCompleted ? '[COMPLETED]' : '[CANCELLED]')
-      })
+    const log = (...args: any[]) =>
+      console.debug(`${new Date().toISOString()} - ${name} -`, ...args)
+    return this.tap(a => log(extract(a))).onTerminate((err, isCompleted) => {
+      if (err) {
+        log('[FAILURE]', err)
+        return
+      }
+      log(isCompleted ? '[COMPLETED]' : '[CANCELLED]')
+    })
   }
 
   /**
@@ -1084,11 +1115,7 @@ export namespace Stream {
   }
 
   export function range(start: number, end: number, increment: number = 1): Stream<number> {
-    return unfold(
-      start,
-      increment > 0 ? n => n <= end : n => n >= end,
-      n => [n + increment, n],
-    )
+    return unfold(start, increment > 0 ? n => n <= end : n => n >= end, n => [n + increment, n])
   }
 
   export function unfold<S, A>(s: S, cont: (s: S) => boolean, f: (s: S) => [S, A]) {
@@ -1115,7 +1142,7 @@ export namespace Stream {
       let cont = true
       while (cont && !done) {
         const step = iterator.next()
-        done = step.done
+        done = !!step.done
         if (!done || step.value !== undefined) {
           cont = await push(step.value)
         }
@@ -1125,15 +1152,16 @@ export namespace Stream {
   }
 
   export function fromAsyncIterator<A>(it: () => AsyncIterator<A>): Stream<A> {
+    return fromAsyncIterable({ [Symbol.asyncIterator]: it })
+  }
+
+  export function fromAsyncIterable<A>(iterable: AsyncIterable<A>): Stream<A> {
     return create(async (push: (a: A) => P<boolean>) => {
-      const iterator = it()
-      let done = false
       let cont = true
-      while (cont && !done) {
-        const step = await iterator.next()
-        done = step.done
-        if (!done || step.value !== undefined) {
-          cont = await push(step.value)
+      for await (const a of iterable) {
+        cont = await push(a)
+        if (!cont) {
+          break
         }
       }
       return cont
@@ -1158,7 +1186,9 @@ export namespace Stream {
    *
    * @private
    */
-  export function createChunked<A>(foreach: (push: (a: Chunk<A>) => P<boolean>) => Promise<boolean>): Stream<A> {
+  export function createChunked<A>(
+    foreach: (push: (a: Chunk<A>) => P<boolean>) => Promise<boolean>,
+  ): Stream<A> {
     return new StreamImpl(foreach)
   }
 
@@ -1171,7 +1201,10 @@ export namespace Stream {
    */
   export function createSimpleConcurrent<A>(
     foreach: (queue: QueueWriter<A>) => Promise<void>,
-    queueOptions: { capacity?: number, overflowStrategy?: OverflowStrategy } = {},
+    queueOptions: {
+      capacity?: number
+      overflowStrategy?: OverflowStrategy
+    } = {},
   ): Stream<A> {
     return createConcurrent(queue => foreach(queue.mapInput(a => Chunk.singleton(a))), queueOptions)
   }
@@ -1186,12 +1219,19 @@ export namespace Stream {
     foreach: (queue: QueueWriter<Chunk<A>>) => Promise<void>,
     queueOptions: BufferAllOptions<Chunk<A>> = {},
   ): Stream<A> {
-    return createChunked(push => enumeratorToQueue(foreach, queueOptions).use(queue => readQueue(queue, push)))
+    return createChunked(push =>
+      enumeratorToQueue(foreach, queueOptions).use(queue => readQueue(queue, push)),
+    )
   }
 
   export function merge<A, B>(s1: Stream<A>, s2: Stream<B>): Stream<A | B>
   export function merge<A, B, C>(s1: Stream<A>, s2: Stream<B>, s3: Stream<C>): Stream<A | B | C>
-  export function merge<A, B, C, D>(s1: Stream<A>, s2: Stream<B>, s3: Stream<C>, s4: Stream<D>): Stream<A | B | C | D>
+  export function merge<A, B, C, D>(
+    s1: Stream<A>,
+    s2: Stream<B>,
+    s3: Stream<C>,
+    s4: Stream<D>,
+  ): Stream<A | B | C | D>
   export function merge<A, B, C, D, E>(
     s1: Stream<A>,
     s2: Stream<B>,
@@ -1200,13 +1240,15 @@ export namespace Stream {
     s5: Stream<E>,
   ): Stream<A | B | C | D | E>
   export function merge(...streams: Stream<any>[]): Stream<any> {
-    return Stream.createConcurrent(queue => Promise.all(streams.map(s => s.toChunkQueue(queue))).then(() => {}))
+    return Stream.createConcurrent(queue =>
+      Promise.all(streams.map(s => s.toChunkQueue(queue))).then(() => {}),
+    )
   }
 }
 
 export interface BufferOptions<A> {
-  overflowStrategy?: OverflowStrategy,
-  onCloseCleanup?: (remaining: A) => void,
+  overflowStrategy?: OverflowStrategy
+  onCloseCleanup?: (remaining: A) => void
 }
 
 export type BufferAllOptions<A> = { capacity?: number } & BufferOptions<A>
@@ -1223,11 +1265,7 @@ function enumeratorToQueue<A>(
   return new ManagedImpl<Queue<Take<A>>>(
     async () => {
       const queue = Queue.create<Take<A>>(capacity, overflowStrategy, remaining => {
-        remaining.forEach(value => value.fold(
-          onCloseCleanup,
-          () => {},
-          err => console.error(err),
-        ))
+        remaining.forEach(value => value.fold(onCloseCleanup, () => {}, err => console.error(err)))
       })
       enumerator(queue.mapInput(a => Take.value(a))).then(
         () => queue.offerIfNotClosed(Take.done()),
@@ -1273,9 +1311,9 @@ export class Take<A> {
 }
 
 export interface ThrottleOptions<A> {
-  cost?: number,
-  maximumBurst?: number,
-  costCalculation?: (x: A) => number,
-  failOnPressure?: boolean,
+  cost?: number
+  maximumBurst?: number
+  costCalculation?: (x: A) => number
+  failOnPressure?: boolean
   elements?: number
 }
