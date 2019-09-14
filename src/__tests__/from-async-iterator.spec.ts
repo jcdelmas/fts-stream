@@ -1,5 +1,5 @@
 import { Stream } from '../stream'
-import { delay } from '../promises'
+import { delay } from '../helpers'
 
 describe('fromAsyncIterator', () => {
   test('simple', async () => {

@@ -2,48 +2,40 @@ import { Consumer } from '../consumer'
 import { Stream } from '../stream'
 
 describe('peel', () => {
+  // TODO: Missing test when no result is available
 
-  test('chunked stream', async () => {
-    const [h, ts] = await Stream.from([1, 2, 3, 4]).peel(Consumer.take(2))
-    const t = await ts.toArray()
-    expect(h).toEqual([1, 2])
-    expect(t).toEqual([3, 4])
+  test('simple', async () => {
+    const result = await Stream.range(1, 4)
+      .peel(Consumer.take(2), (head, tail) => tail.concat(Stream.from(head)))
+      .toArray()
+    expect(result).toEqual([3, 4, 1, 2])
   })
 
-  test('unchunked stream', async () => {
-    const [h, ts] = await Stream.range(1, 4).peel(Consumer.take(2))
-    const t = await ts.toArray()
-    expect(h).toEqual([1, 2])
-    expect(t).toEqual([3, 4])
-  })
-
-  test('chunked stream - early stop', async () => {
-    const [h, ts] = await Stream.from([1, 2]).peel(Consumer.take(4))
-    const t = await ts.toArray()
-    expect(h).toEqual([1, 2])
-    expect(t).toEqual([])
-  })
-
-  test('unchunked stream - early stop', async () => {
-    const [h, ts] = await Stream.range(1, 2).peel(Consumer.take(4))
-    const t = await ts.toArray()
-    expect(h).toEqual([1, 2])
-    expect(t).toEqual([])
+  test('early end', async () => {
+    const result = await Stream.range(1, 2)
+      .peel(Consumer.take(4), (head, tail) => tail.concat(Stream.from(head)))
+      .toArray()
+    expect(result).toEqual([1, 2])
   })
 
   test('with early error', async () => {
     expect.assertions(1)
     try {
-      await Stream.range(1, 2).concat(Stream.failed(new Error('Coucou'))).peel(Consumer.take(4))
+      await Stream.range(1, 2)
+        .concat(Stream.failed(new Error('Coucou')))
+        .peel(Consumer.take(4), (head, tail) => Stream.from(head).concat(tail))
+        .run()
     } catch (e) {
       expect(e).toEqual(new Error('Coucou'))
     }
   })
 
   test('with late error', async () => {
-    const [h, ts] = await Stream.from([1, 2, 3, 4]).concat(Stream.failed('Coucou')).peel(Consumer.take(2))
-    const t = await ts.recover(e => e).toArray()
-    expect(h).toEqual([1, 2])
-    expect(t).toEqual([3, 4, 'Coucou'])
+    const result = await Stream.from([1, 2, 3, 4])
+      .concat(Stream.failed('Coucou'))
+      .peel(Consumer.take(2), (head, tail) => Stream.from(head).concat(tail))
+      .recover(e => e)
+      .toArray()
+    expect(result).toEqual([1, 2, 3, 4, 'Coucou'])
   })
 })

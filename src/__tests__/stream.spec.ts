@@ -22,23 +22,26 @@ describe('range', () => {
 
 describe('fromIterator', () => {
   withStream(Stream.fromIterator)
-    .test('empty', [], function *() { if (false) return 1 })
-    .test('simple', [1, 2, 3, 4], function *() {
+    .test('empty', [], function*() {
+      if (false) return 1
+    })
+    .test('simple', [1, 2, 3], function*() {
       yield 1
       yield 2
       yield 3
-      return 4
     })
-    .test('without return', ['foo', 'bar'], function *() {
+    .test('without return', ['foo', 'bar'], function*() {
       yield 'foo'
       yield 'bar'
     })
 
-  testStreamPurity(Stream.fromIterator(function *() {
-    yield 1
-    yield 2
-    return 3
-  }))
+  testStreamPurity(
+    Stream.fromIterator(function*() {
+      yield 1
+      yield 2
+      yield 3
+    }),
+  )
 })
 
 describe('fromPromise', () => {
@@ -51,7 +54,9 @@ describe('fromPromise', () => {
 
 describe('pipe', () => {
   test('simple', async () => {
-    const result = await Stream.from([1, 2, 3]).pipe(s => s.map(x => x + 1)).toArray()
+    const result = await Stream.from([1, 2, 3])
+      .pipe(s => s.map(x => x + 1))
+      .toArray()
     expect(result).toEqual([2, 3, 4])
   })
 })

@@ -1,43 +1,39 @@
 import fs, { PathLike, WriteStream } from 'fs'
 import { Sink, Stream } from '../stream'
-import { nodeBinaryReadableStreamToStream, nodeStringReadableStreamToStream, nodeWritableStreamToSink } from './stream'
+import { readableToBinaryStream, readableToStringStream, writableToSink } from './stream'
 
 interface ReadFileOptions {
   start?: number
   end?: number
 }
 
-export function readTextFile(
+export function textFileStream(
   path: PathLike,
   encoding: string = 'UTF-8',
   chunkSize: number = 16384,
   options?: ReadFileOptions,
 ): Stream<string> {
-  return nodeStringReadableStreamToStream(
-    () => fs.createReadStream(path, {
+  return readableToStringStream(() =>
+    fs.createReadStream(path, {
       ...options,
       encoding,
       autoClose: false,
       highWaterMark: chunkSize,
     }),
-    chunkSize,
-    stream => stream.close(),
   )
 }
 
-export function readBinaryFile(
+export function binaryFileStream(
   path: PathLike,
   chunkSize: number = 16384,
   options?: ReadFileOptions,
 ): Stream<Buffer> {
-  return nodeBinaryReadableStreamToStream(
-    () => fs.createReadStream(path, {
+  return readableToBinaryStream(() =>
+    fs.createReadStream(path, {
       ...options,
       autoClose: false,
       highWaterMark: chunkSize,
     }),
-    chunkSize,
-    stream => stream.close(),
   )
 }
 
@@ -45,21 +41,18 @@ interface WriteFileOptions {
   start?: number
 }
 
-export function writeTextFile(
+export function textFileSink(
   path: PathLike,
   encoding: string = 'UTF-8',
   options?: WriteFileOptions,
 ): Sink<string, void> {
-  return nodeWritableStreamToSink<string, WriteStream>(
-    () => fs.createWriteStream(path, { ...options, encoding, autoClose: false }),
+  return writableToSink<string, WriteStream>(() =>
+    fs.createWriteStream(path, { ...options, encoding, autoClose: false }),
   )
 }
 
-export function writeBinaryFile(
-  path: PathLike,
-  options?: WriteFileOptions,
-): Sink<Buffer, void> {
-  return nodeWritableStreamToSink<Buffer, WriteStream>(
-    () => fs.createWriteStream(path, { ...options, autoClose: false }),
+export function binaryFileSink(path: PathLike, options?: WriteFileOptions): Sink<Buffer, void> {
+  return writableToSink<Buffer, WriteStream>(() =>
+    fs.createWriteStream(path, { ...options, autoClose: false }),
   )
 }

@@ -1,147 +1,122 @@
-import { Chunk } from './chunk'
-import { Maybe, P } from './helpers';
+export class Consumer<A, R, AA = A> {
+  constructor(public iteratee: () => Consumer.Iteratee<A, R, AA>) {}
 
-export class Consumer<A, R> {
-  constructor(public iteratee: () => Iteratee<A, R>) {}
-
-  mapResult<R2>(f: (r: R) => P<R2>): Consumer<A, R2> {
+  mapResult<R2>(f: (r: R) => R2): Consumer<A, R2, AA> {
     return new Consumer(() => {
       const it = this.iteratee()
       return {
-        update: it.update.bind(it),
-        async result() {
-          const r = await it.result()
-          return f(r)
-        }
+        next(a: A) {
+          const resp = it.next(a)
+          return resp && { result: f(resp.result), remaining: resp.remaining }
+        },
+        done() {
+          return f(it.done())
+        },
       }
     })
   }
 }
 
-interface Iteratee<A, R> {
-  update(a: Chunk<A>): P<Consumer.Cont | Chunk<A>>
-  result(): P<R>
-}
-
-export interface SimpleIteratee<A, R> {
-  update(a: A): Consumer.Cont | A | undefined
-  result(): R
+export function continuousIteratee<A, R>(
+  consumer: Consumer<A, R>,
+): { next: (a: A) => R[]; done: () => R } {
+  let iteratee = consumer.iteratee()
+  const next = (a: A): R[] => {
+    const resp = iteratee.next(a)
+    if (resp) {
+      iteratee = consumer.iteratee()
+      return [resp.result, ...resp.remaining.flatMap(a => next(a) || [])]
+    } else {
+      return []
+    }
+  }
+  return { next, done: () => iteratee.done() }
 }
 
 export namespace Consumer {
-  export type Cont = { __tag: 'cont' }
-  export const Cont: Cont = { __tag: 'cont' }
-
-  export function simple<A, R>(factory: () => SimpleIteratee<A, R>): Consumer<A, R> {
-    return new Consumer<A, R>(() => {
-      const iteratee = factory()
-      let chunkRemaining: Chunk<A> | undefined
-      return {
-        async update(as: Chunk<A>) {
-          let i = 0
-          for (const a of as) {
-            const resp = await iteratee.update(a)
-            i++
-            if (resp !== Cont) {
-              const base = as.drop(i)
-              return resp !== undefined ? Chunk.singleton(resp as A).concat(base) : base
-            }
-          }
-          return Cont
-        },
-        result() {
-          return iteratee.result()
-        }
-      }
-    })
+  export type Iteratee<A, R, AA> = {
+    next: (a: A) => Result<AA, R> | undefined
+    done: () => R
   }
 
+  export type Result<A, R> = { result: R; remaining: A[] }
+
   export function head<A>(): Consumer<A, A | undefined> {
-    return simple(() => {
-      let last: A | undefined
-      return {
-        update(a: A): undefined {
-          last = a
-          return undefined
-        },
-        result(): A | undefined {
-          return last
-        }
-      }
-    })
+    return new Consumer(() => ({
+      next(a: A) {
+        return { result: a, remaining: [] }
+      },
+      done() {
+        return undefined
+      },
+    }))
   }
 
   export function take<A>(n: number): Consumer<A, A[]> {
     if (n < 1) throw new Error('n must be greater than or equal to 1')
-    return simple<A, A[]>(() => {
+    return new Consumer<A, A[]>(() => {
       let i = n
       const acc: A[] = []
       return {
-        update(a: A): Cont | undefined {
+        next(a: A) {
           acc.push(a)
-          i-- 
-          return i > 0 ? Cont : undefined
+          i--
+          return i === 0 ? { result: acc, remaining: [] } : undefined
         },
-        result(): A[] {
+        done() {
           return acc
-        }
+        },
       }
     })
   }
 
-  export function takeWhile<A>(pred: (a: A) => boolean): Consumer<A, A[]> {
-    return simple<A, A[]>(() => {
+  export function takeWhile<A>(f: (a: A) => boolean): Consumer<A, A[]> {
+    return new Consumer<A, A[]>(() => {
       const acc: A[] = []
       return {
-        update(a: A): Cont | A {
-          if (pred(a)) {
+        next(a: A) {
+          if (f(a)) {
             acc.push(a)
-            return Cont
+          } else {
+            return { result: acc, remaining: [a] }
           }
-          return a
         },
-        result(): A[] {
+        done() {
           return acc
-        }
+        },
       }
     })
   }
 
-  export function chain<A, R1, R2>(c1: Consumer<A, R1>, c2: Consumer<A, R2>): Consumer<A, [R1, R2]>
-  export function chain<A, R1, R2, R3>(
-    c1: Consumer<A, R1>, 
-    c2: Consumer<A, R2>, 
-    c3: Consumer<A, R3>
-  ): Consumer<A, [R1, R2, R3]>
-  export function chain<A, R1, R2, R3, R4>(
-    c1: Consumer<A, R1>, 
-    c2: Consumer<A, R2>, 
-    c3: Consumer<A, R3>, 
-    c4: Consumer<A, R4>
-  ): Consumer<A, [R1, R2, R3, R4]>
-  
-  export function chain<A>(...consumers: Consumer<A, any>[]): Consumer<A, any[]> {
-    return new Consumer(() => {
-      const iteratees = consumers.map(c => c.iteratee())
-      let idx: number = 0
-      const len = iteratees.length
-      return {
-        async update(a: Chunk<A>): Promise<Cont | Chunk<A>> {
-          let resp = iteratees[idx].update(a)
-          while (resp instanceof Chunk) {
-            idx++
-            if (idx < len) {
-              resp = iteratees[idx].update(resp)
-            } else {
-              return resp
-            }
-          }
-          return Cont
-        },
-        result(): Promise<any[]> {
-          return Promise.all(iteratees.map(it => it.result()))
-        }
-      } 
-    })
-  }
+  // export function chain<A, R1, R2>(c1: Consumer<A, R1>, c2: Consumer<A, R2>): Consumer<A, [R1, R2]>
+  // export function chain<A, R1, R2, R3>(
+  //   c1: Consumer<A, R1>,
+  //   c2: Consumer<A, R2>,
+  //   c3: Consumer<A, R3>,
+  // ): Consumer<A, [R1, R2, R3]>
+  // export function chain<A, R1, R2, R3, R4>(
+  //   c1: Consumer<A, R1>,
+  //   c2: Consumer<A, R2>,
+  //   c3: Consumer<A, R3>,
+  //   c4: Consumer<A, R4>,
+  // ): Consumer<A, [R1, R2, R3, R4]>
+
+  // export function chain<A>(...consumers: Consumer<A, any>[]): Consumer<A, any[]> {
+  //   return new Consumer(() => {
+  //     const iteratees = consumers.map(c => c.iteratee())
+  //     let idx: number = 0
+  //     const len = iteratees.length
+  //     return (a: A) => {
+  //       let resp = iteratees[idx](a)
+  //       while (resp) {
+  //         idx++
+  //         if (idx < len) {
+  //           resp = iteratees[idx](resp.remaining)
+  //         } else {
+  //           return resp
+  //         }
+  //       }
+  //     }
+  //   })
+  // }
 }

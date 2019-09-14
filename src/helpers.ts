@@ -1,30 +1,47 @@
-
-export type P<A> = A | Promise<A>
-
-export class Either<L, R> {
-    constructor(public fold: <T>(left: (l: L) => T, right: (r: R) => T) => T) {}
+export async function swallowErrors(block: () => unknown | Promise<unknown>): Promise<void> {
+  try {
+    await block()
+  } catch (e) {
+    console.error(e)
+  }
 }
 
-export namespace Either {
-    export function left<L>(l: L): Either<L, never> {
-        return new Either((left) => left(l))
-    }
-
-    export function right<R>(r: R): Either<never, R> {
-        return new Either((left, right) => right(r))
-    }
+export function delay(millis: number): Promise<void> {
+  return new Promise<void>(resolve => {
+    setTimeout(resolve, millis)
+  })
 }
 
-export class Maybe<A> {
-    constructor(public fold: <T>(just: (a: A) => T, empty: () => T) => T) {}
+export async function safelyReturn<A>(iterator: AsyncIterator<A>) {
+  return swallowErrors(() => iterator.return && iterator.return())
 }
 
-export namespace Maybe {
-    export function just<A>(a: A): Maybe<A> {
-        return new Maybe((just) => just(a))
+export interface PromiseChannel<A> {
+  promise: Promise<A>
+  closed: boolean
+  resolve(a: A): void
+  reject(err: any): void
+}
+
+export function promiseChannel<A>(): PromiseChannel<A> {
+  return new (class {
+    closed: boolean = false
+
+    promise = new Promise<A>((resolve, reject) => {
+      this.resolveChan = resolve
+      this.rejectChan = reject
+    })
+    private resolveChan: ((a: A) => void) | undefined
+    private rejectChan: ((err: any) => void) | undefined
+
+    resolve(a: A): void {
+      ;(this.resolveChan as (a: A) => void)(a)
+      this.closed = true
     }
 
-    export function empty(): Maybe<never> {
-        return new Maybe((just, empty) => empty())
+    reject(err: any): void {
+      ;(this.rejectChan as (err: any) => void)(err)
+      this.closed = true
     }
+  })()
 }

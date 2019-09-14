@@ -1,8 +1,11 @@
-import { delay } from '../promises'
+import { delay } from '../helpers'
 import { Pipe, Stream } from '../stream'
+import { streamToClose } from './utils'
 
 export function checkStream<A>(stream: Stream<A>, expected: A[]): Promise<void> {
-  return stream.toArray().then(result => { expect(result).toEqual(expected) })
+  return stream.toArray().then(result => {
+    expect(result).toEqual(expected)
+  })
 }
 
 export function testStream<A>(name: string, stream: Stream<A>, expected: A[]) {
@@ -40,28 +43,29 @@ export function testStreamEquals<A>(name: string, stream1: Stream<A>, stream2: S
 }
 
 export function withStream<A>(f: (...args: any[]) => Stream<A>) {
-  return new class {
+  return new (class {
     test(name: string, expected: A[], ...args: any[]): this {
       testStream(name, f(...args), expected)
       return this
     }
-  }
+  })()
 }
 
 const streams: [string, Stream<number>][] = [
   ['empty', Stream.empty()],
   ['single', Stream.single(2)],
-  ['unchunked', Stream.range(1, 5)],
+  ['simple', Stream.range(1, 5)],
   ['single chunk', Stream.from([1, 8, 4, 7, 2, 9])],
-  ['chunked', Stream.range(1, 5).flatMap(a => Stream.from([a, 9, 2, 6, 1, 10 - a]))],
 ]
 
 export function foreachStreams(f: (name: string, stream: Stream<number>) => void) {
   streams.forEach(args => f(...args))
 }
 
-export function withFlowProp(f: (...args: any[]) => [(s: Stream<any>) => Stream<any>, (as: any[]) => any[]]) {
-  return new class {
+export function withFlowProp(
+  f: (...args: any[]) => [(s: Stream<any>) => Stream<any>, (as: any[]) => any[]],
+) {
+  return new (class {
     test<B>(name: string, array: B[], ...args: any[]): this {
       const [streamTransform, arrayTransform] = f(...args)
       testStream(name, streamTransform(Stream.from(array)), arrayTransform(array))
@@ -82,7 +86,7 @@ export function withFlowProp(f: (...args: any[]) => [(s: Stream<any>) => Stream<
       })
       return this
     }
-  }
+  })()
 }
 
 export function delayedArray<A>(array: A[], interval: number): Stream<A> {
@@ -94,8 +98,28 @@ export function delayedArray<A>(array: A[], interval: number): Stream<A> {
 }
 
 export function delayedPipe<A>(duration: number): Pipe<A, A> {
-  return s => s.mapAsync(async a => {
-    await delay(duration)
-    return a
+  return s =>
+    s.mapAsync(async a => {
+      await delay(duration)
+      return a
+    })
+}
+
+/**
+ * Test that a pipe properly propagate cancellation to allow resource cleanup.
+ * @param pipe
+ */
+export async function testCancellation<A>(
+  pipe: Pipe<number, A>,
+  opts: { only: boolean; name: string } = { only: false, name: 'cancel propagation' },
+): Promise<void> {
+  ;(opts.only ? test.only : test)(opts.name, async () => {
+    const source = streamToClose()
+    await source.stream
+      .pipe(pipe)
+      .take(1)
+      .run()
+    await delay(500)
+    expect(source.closed).toBe(true)
   })
 }

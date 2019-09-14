@@ -1,8 +1,8 @@
 import _ from 'lodash'
 import path from 'path'
-import { delay } from '../../promises'
+import { delay } from '../../helpers'
 import { Stream } from '../../stream'
-import { readBinaryFile, readTextFile, writeBinaryFile, writeTextFile } from '../file'
+import { binaryFileStream, textFileStream, binaryFileSink, textFileSink } from '../file'
 
 const tmpDir = process.env.TMPDIR || '/tmp'
 
@@ -14,11 +14,10 @@ describe('files', () => {
 
     await Stream.range(1, lines)
       .map(() => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\n')
-      .to(writeTextFile(filePath))
+      .to(textFileSink(filePath))
     await delay(500)
-    const result = await readTextFile(filePath).reduce(0, (sum, str) => sum + str.length)
+    const result = await textFileStream(filePath).reduce(0, (sum, str) => sum + str.length)
     expect(result).toEqual(lines * 64)
-
   })
 
   test('write and read binary file', async () => {
@@ -27,9 +26,11 @@ describe('files', () => {
     const filePath = path.join(tmpDir, fileName)
 
     await Stream.range(1, lines)
-      .map(() => Buffer.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\n', 'utf8'))
-      .to(writeBinaryFile(filePath))
-    const result = await readBinaryFile(filePath).reduce(0, (sum, str) => sum + str.length)
+      .map(() =>
+        Buffer.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\n', 'utf8'),
+      )
+      .to(binaryFileSink(filePath))
+    const result = await binaryFileStream(filePath).reduce(0, (sum, str) => sum + str.length)
     expect(result).toEqual(lines * 64)
   })
 })

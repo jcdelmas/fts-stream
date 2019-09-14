@@ -46,7 +46,7 @@ describe('Queue.bounded', () => {
     await queue.take().then(() => events.push('t3'))
     await offer2P
     await offer3P
-    expect(events).toEqual(['o1', 'o2', 't1', 'o3', 't2', 't3'])
+    expect(events).toEqual(['o1', 't1', 'o2', 't2', 'o3', 't3'])
   })
   test('back pressure with 0 capacity queue', async () => {
     const events: string[] = []
@@ -57,7 +57,7 @@ describe('Queue.bounded', () => {
     await queue.take().then(() => events.push('t2'))
     await offer1P
     await offer2P
-    expect(events).toEqual(['o1', 't1', 'o2', 't2'])
+    expect(events).toEqual(['t1', 'o1', 't2', 'o2'])
   })
   test('drain', () => {
     const queue = Queue.bounded<number>(2)
@@ -70,7 +70,7 @@ describe('Queue.bounded', () => {
   })
   test('onClose', () => {
     let remaining: number[] = []
-    const queue = Queue.bounded<number>(2, as => remaining = as)
+    const queue = Queue.bounded<number>(2, as => (remaining = as))
     queue.offer(1)
     queue.offer(2)
     queue.offer(3)

@@ -1,78 +1,32 @@
-import { Chunk } from './chunk'
-import { bracket, promiseChannel } from './promises'
-import { Interrupted, Queue } from './queue'
-import { Pipe, Stream, Take } from './stream'
+import { Queue } from './queue'
+import { Sink, Stream } from './stream'
 
-interface Subscriber<A> {
-  next(a: A): Promise<boolean>
-  complete(): void
-  fail(err: any): void
-}
+export function balance<A>(): [Sink<A, void>, Stream<A>] {
+  let subscriberCount: number = 0
+  const queue = Queue.bounded<A>(0)
 
-export function balance<A>(): Pipe<A, Stream<A>> {
-  return stream => Stream.lazy(() => {
-    let subscriberCount: number = 0
-    const subscribers: Queue<Take<Subscriber<Chunk<A>>>> = Queue.unbounded(remaining => {
-      remaining.forEach(take => take.fold(
-        sub => sub.complete(),
-        () => {},
-        err => console.error(err),
-      ))
-    })
-
-    const substream = Stream.createChunked<A>(async push => {
-      const subscriberTermination = promiseChannel<boolean>()
-      const subscriber = new class {
-        async next(chunk: Chunk<A>) {
-          const cont = await push(chunk)
-          if (!cont) {
-            subscriberTermination.resolve(false)
-          }
-          return cont
-        }
-
-        complete() {
-          subscriberTermination.resolve(true)
-        }
-
-        fail(err: any) {
-          subscriberTermination.reject(err)
-        }
+  const stream = Stream.fromAsyncIterator<A>(async function*() {
+    subscriberCount++
+    try {
+      for await (const a of queue) {
+        yield a
       }
-      subscriberCount++
-      await subscribers.offer(Take.value(subscriber))
-      return subscriberTermination.promise
-    })
-
-    return Stream.repeat(substream).onTerminate(() => {
-      return bracket(
-        () => stream.foreachChunks(async chunk => {
-          const take = await subscribers.take()
-          take.fold(
-            sub => {
-              sub.next(chunk)
-                .then(
-                  async cont => {
-                    if (cont && !subscribers.isClosed) {
-                      await subscribers.offer(Take.value(sub))
-                    } else {
-                      sub.complete()
-                      subscriberCount--
-                      if (subscriberCount === 0) {
-                        await subscribers.offerIfNotClosed(Take.done())
-                      }
-                    }
-                  },
-                )
-                .catch(err => subscribers.offer(Take.fail(err)))
-            },
-            () => {},
-            err => { throw err },
-          )
-          return subscriberCount > 0
-        }).then(() => {}),
-        () => subscribers.close(),
-      )
-    })
+    } finally {
+      subscriberCount--
+      if (subscriberCount === 0) queue.close()
+    }
   })
+
+  const sink = async (source: Stream<A>) => {
+    try {
+      for await (const a of source) {
+        await queue.offerIfNotClosed(a)
+        if (queue.isClosed) break
+      }
+    } finally {
+      queue.close()
+    }
+  }
+
+  return [sink, stream]
 }

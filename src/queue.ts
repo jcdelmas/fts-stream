@@ -1,3 +1,4 @@
+import { promiseChannel } from './helpers'
 
 export enum OverflowStrategy {
   SLIDING = 'SLIDING',
@@ -6,21 +7,24 @@ export enum OverflowStrategy {
   BACK_PRESSURE = 'BACK_PRESSURE',
 }
 
-interface Pending<A> { resolve: (a: A) => void, interrupt: () => void }
+interface Pending<A> {
+  value: A
+  interrupt: () => void
+}
 
-export interface QueueReader<A> {
-  take(): Promise<A>
+export interface QueueReader<A> extends AsyncIterable<A> {
+  take(): Promise<A | Interrupted>
 }
 
 export interface QueueWriter<A> {
   isClosed: boolean
-  offer(a: A): Promise<void>
-  offerIfNotClosed(a: A): Promise<void>
+  offer(a: A): Promise<boolean>
+  offerIfNotClosed(a: A): Promise<boolean>
+  onAvailable(): Promise<void>
   mapInput<B>(f: (b: B) => A): QueueWriter<B>
 }
 
 export class Queue<A> implements QueueReader<A>, QueueWriter<A> {
-
   get size(): number {
     return this.queue.size
   }
@@ -41,12 +45,20 @@ export class Queue<A> implements QueueReader<A>, QueueWriter<A> {
     return this.pendingProducers.length > 0
   }
 
-  static create<A>(capacity: number, overflowStrategy: OverflowStrategy, onClose: (remaining: A[]) => void = () => {}) {
+  static create<A>(
+    capacity: number,
+    overflowStrategy: OverflowStrategy,
+    onClose: (remaining: A[]) => void = () => {},
+  ) {
     switch (overflowStrategy) {
-      case OverflowStrategy.BACK_PRESSURE: return this.bounded<A>(capacity, onClose)
-      case OverflowStrategy.SLIDING      : return this.sliding<A>(capacity, onClose)
-      case OverflowStrategy.DROPPING     : return this.dropping<A>(capacity, onClose)
-      case OverflowStrategy.FAIL         : return this.failing<A>(capacity, onClose)
+      case OverflowStrategy.BACK_PRESSURE:
+        return this.bounded<A>(capacity, onClose)
+      case OverflowStrategy.SLIDING:
+        return this.sliding<A>(capacity, onClose)
+      case OverflowStrategy.DROPPING:
+        return this.dropping<A>(capacity, onClose)
+      case OverflowStrategy.FAIL:
+        return this.failing<A>(capacity, onClose)
     }
   }
 
@@ -72,8 +84,9 @@ export class Queue<A> implements QueueReader<A>, QueueWriter<A> {
 
   isClosed = false
 
-  private pendingProducers: Pending<(a: A) => void>[] = []
-  private pendingConsumers: Pending<A>[] = []
+  private pendingProducers: Pending<A>[] = []
+  private pendingConsumers: Pending<(a: A) => void>[] = []
+  private pendingAvailable: (() => void)[] = []
 
   private constructor(
     private queue: NonBlockingQueue<A>,
@@ -81,55 +94,64 @@ export class Queue<A> implements QueueReader<A>, QueueWriter<A> {
     private onClose: (remaining: A[]) => void = () => {},
   ) {}
 
-  offer(a: A): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.checkNotClosed(reject)
-      const pending = this.pendingConsumers.shift()
-      if (pending !== undefined) {
-        // The queue is empty and a pending consumer is waiting
-        pending.resolve(a)
-        resolve()
-      } else if (this.queue.offer(a)) {
-        resolve()
-      } else {
-        switch (this.overflowStrategy) {
-          case OverflowStrategy.BACK_PRESSURE:
-            this.pendingProducers.push({
-              resolve(consumer) {
-                consumer(a)
-                resolve()
-              },
-              interrupt() {
-                reject(Interrupted)
-              },
-            })
-            break
-          case OverflowStrategy.FAIL:
-            reject('Too much pressure')
-            break
-          default:
-            resolve()
-        }
+  async offer(a: A): Promise<boolean> {
+    this.checkNotClosed()
+    const pending = this.pendingConsumers.shift()
+    if (pending !== undefined) {
+      // The queue is empty and a pending consumer is waiting
+      pending.value(a)
+      return true
+    } else if (this.queue.offer(a)) {
+      return true
+    } else {
+      switch (this.overflowStrategy) {
+        case OverflowStrategy.BACK_PRESSURE:
+          const channel = promiseChannel<boolean>()
+          this.pendingProducers.push({
+            get value() {
+              channel.resolve(true)
+              return a
+            },
+            interrupt() {
+              channel.resolve(false)
+            },
+          })
+          return channel.promise
+        case OverflowStrategy.FAIL:
+          throw new Error('Too much pressure')
+        default:
+          return false
       }
-    })
+    }
   }
 
-  async offerIfNotClosed(a: A): Promise<void> {
-    if (!this.isClosed) {
-      await this.offer(a)
+  async offerIfNotClosed(a: A): Promise<boolean> {
+    return !this.isClosed ? this.offer(a) : false
+  }
+
+  async onAvailable(): Promise<void> {
+    if (!this.isClosed && this.queue.isFull && this.pendingConsumers.length === 0) {
+      const channel = promiseChannel<void>()
+      this.pendingAvailable.push(() => channel.resolve())
+      return channel.promise
     }
   }
 
   mapInput<B>(f: (b: B) => A): QueueWriter<B> {
     const self = this
-    return new class {
-      offer(b: B): Promise<void> {
+    return new (class {
+      offer(b: B): Promise<boolean> {
         return self.offer(f(b))
       }
-      async offerIfNotClosed(b: B): Promise<void> {
+      async offerIfNotClosed(b: B): Promise<boolean> {
         if (!this.isClosed) {
-          await this.offer(b)
+          return this.offer(b)
+        } else {
+          return false
         }
+      }
+      async onAvailable(): Promise<void> {
+        return self.onAvailable()
       }
       get isClosed(): boolean {
         return self.isClosed
@@ -137,75 +159,86 @@ export class Queue<A> implements QueueReader<A>, QueueWriter<A> {
       mapInput<C>(f2: (c: C) => B): QueueWriter<C> {
         return mapQueueWrite(this, f2)
       }
+    })()
+  }
+
+  async take(): Promise<A | Interrupted> {
+    if (this.isClosed) return Interrupted
+    const a = this.queue.take()
+    if (a !== undefined) {
+      // Free a pending producer if any
+      const producer = this.pendingProducers.shift()
+      if (producer !== undefined) this.queue.offer(producer.value)
+      else this.notifyAvailable()
+      return a
+    } else {
+      const producer = this.pendingProducers.shift()
+      if (producer !== undefined) {
+        return producer.value
+      } else {
+        const channel = promiseChannel<A | Interrupted>()
+        this.pendingConsumers.push({
+          value: (a: A) => channel.resolve(a),
+          interrupt: () => channel.resolve(Interrupted),
+        })
+        this.notifyAvailable()
+        return channel.promise
+      }
     }
   }
 
-  take(): Promise<A> {
-    return new Promise<A>((resolve, reject) => {
-      this.checkNotClosed(reject)
-      const a = this.queue.take()
-      if (a !== undefined) {
-        resolve(a)
-        // Free potential producers
-        const producer = this.pendingProducers.shift()
-        if (producer !== undefined) producer.resolve(a2 => this.queue.offer(a2))
-      } else {
-        const producer = this.pendingProducers.shift()
-        if (producer !== undefined) {
-          producer.resolve(resolve)
-        } else {
-          this.pendingConsumers.push({
-            resolve,
-            interrupt: () => reject(Interrupted),
-          })
-        }
-      }
-    })
+  private notifyAvailable() {
+    this.pendingAvailable.forEach(f => f())
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<A> {
+    while (true) {
+      const a = await this.take()
+      if (a === Interrupted) break
+      yield a as A
+    }
   }
 
   close(): void {
     if (this.isClosed) {
       return
     }
-    this.onClose(this.drain())
-    for (const consumer of this.pendingConsumers) {
-      consumer.interrupt()
-    }
     this.isClosed = true
+    this.pendingConsumers.forEach(c => c.interrupt())
+    this.onClose(this.drain())
+    if (this.queue.size === 0) this.notifyAvailable()
   }
 
   drain(): A[] {
-    if (this.isClosed) {
-      return []
-    }
-    const as = this.queue.drain()
-    this.pendingProducers.forEach(producer => producer.resolve(a => as.push(a))) // Producers are always synchronous
+    const as = [...this.queue.drain(), ...this.pendingProducers.map(p => p.value)]
     this.pendingProducers = []
+    if (this.queue.size > 0) this.notifyAvailable()
     return as
   }
 
-  private checkNotClosed(reject: (err: any) => void): void {
-    if (this.isClosed) reject(new Error('Closed queue'))
+  private checkNotClosed(): void {
+    if (this.isClosed) throw new Error('Closed queue')
   }
 }
 
 function mapQueueWrite<A, B>(queue: QueueWriter<A>, f: (b: B) => A): QueueWriter<B> {
-  return new class {
+  return new (class {
     get isClosed() {
       return queue.isClosed
     }
-    offer(b: B): Promise<void> {
+    offer(b: B): Promise<boolean> {
       return queue.offer(f(b))
     }
-    async offerIfNotClosed(b: B): Promise<void> {
-      if (!this.isClosed) {
-        await this.offer(b)
-      }
+    async offerIfNotClosed(b: B): Promise<boolean> {
+      return !this.isClosed ? this.offer(b) : false
+    }
+    onAvailable() {
+      return queue.onAvailable()
     }
     mapInput<C>(f2: (b: C) => B): QueueWriter<C> {
       return mapQueueWrite(this, f2)
     }
-  }
+  })()
 }
 
 interface NonBlockingQueue<A> {
@@ -218,7 +251,6 @@ interface NonBlockingQueue<A> {
 }
 
 export class BoundedQueue<A> implements NonBlockingQueue<A> {
-
   get isFull(): boolean {
     return this.size === this.capacity
   }
@@ -301,5 +333,7 @@ class UnboundedQueue<A> implements NonBlockingQueue<A> {
   }
 }
 
-export interface Interrupted { __tag: 'interrupted' }
+export interface Interrupted {
+  __tag: 'interrupted'
+}
 export const Interrupted: Interrupted = { __tag: 'interrupted' }

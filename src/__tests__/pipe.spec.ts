@@ -1,7 +1,13 @@
 import _ from 'lodash'
-import { delay } from '../promises'
+import { delay } from '../helpers'
 import { Stream } from '../stream'
-import { delayedArray, foreachStreams, testStreamEquals, testStreamPurity, withFlowProp } from './helpers'
+import {
+  delayedArray,
+  foreachStreams,
+  testStreamEquals,
+  testStreamPurity,
+  withFlowProp,
+} from './helpers'
 
 describe('map', () => {
   withFlowProp(<A>(f: (a: A) => any) => [(s: Stream<A>) => s.map(f), (a: A[]) => a.map(f)])
@@ -12,35 +18,19 @@ describe('map', () => {
 })
 
 describe('flatMap', () => {
-  withFlowProp(
-    () => [
-      (s: Stream<number>) => s.flatMap((a: number) => Stream.range(a, a + 5)),
-      (as: number[]) => _.flatten(as.map(a => _.range(a, a + 6, 1))),
-    ],
-  ).testStreamsWithName(s => `${s} to unchunked`)
-  withFlowProp(
-    () => [
-      (s: Stream<number>) => s.flatMap(a => Stream.from([a, a + 3, a - 2])),
-      (as: number[]) => _.flatten(as.map(a => [a, a + 3, a - 2])),
-    ],
-  ).testStreamsWithName(s => `${s} to chunked`)
+  withFlowProp(() => [
+    (s: Stream<number>) => s.flatMap((a: number) => Stream.range(a, a + 5)),
+    (as: number[]) => _.flatten(as.map(a => _.range(a, a + 6, 1))),
+  ]).testStreams()
 
   testStreamPurity(Stream.range(1, 5).flatMap(n => Stream.single(n + 1)))
 
   // Laws
   const f: (n: number) => Stream<number> = n => Stream.range(n, n + 5)
   const g: (n: number) => Stream<number> = n => Stream.from([n, n + 2])
-  testStreamEquals(
-    'left identity',
-    Stream.single(5).flatMap(f),
-    f(5),
-  )
+  testStreamEquals('left identity', Stream.single(5).flatMap(f), f(5))
   foreachStreams((name, stream) => {
-    testStreamEquals(
-      `right identity - ${name}`,
-      stream.flatMap(a => Stream.single(a)),
-      stream,
-    )
+    testStreamEquals(`right identity - ${name}`, stream.flatMap(a => Stream.single(a)), stream)
   })
   foreachStreams((name, stream) => {
     testStreamEquals(
@@ -52,8 +42,10 @@ describe('flatMap', () => {
 })
 
 describe('mapConcat', () => {
-  withFlowProp(<A>(f: (a: A) => any) => [(s: Stream<A>) => s.mapConcat(f), (a: A[]) => _.flatten(a.map(f))])
-    .testStreams((a: number) => [a, a + 2, a - 3])
+  withFlowProp(<A>(f: (a: A) => any) => [
+    (s: Stream<A>) => s.mapConcat(f),
+    (a: A[]) => _.flatten(a.map(f)),
+  ]).testStreams((a: number) => [a, a + 2, a - 3])
 
   testStreamPurity(Stream.range(1, 5).mapConcat((a: number) => [a, a + 2, a - 3]))
 })
@@ -68,7 +60,10 @@ describe('take', () => {
 })
 
 describe('filter', () => {
-  withFlowProp(<A>(f: (a: A) => boolean) => [(s: Stream<A>) => s.filter(f), (a: A[]) => a.filter(f)])
+  withFlowProp(<A>(f: (a: A) => boolean) => [
+    (s: Stream<A>) => s.filter(f),
+    (a: A[]) => a.filter(f),
+  ])
     .testStreamsWithName(s => `${s} - filter some`, (a: number) => a < 3)
     .testStreamsWithName(s => `${s} - filter none`, () => true)
     .testStreamsWithName(s => `${s} - filter all`, () => false)
@@ -77,7 +72,10 @@ describe('filter', () => {
 })
 
 describe('takeWhile', () => {
-  withFlowProp(<A>(f: (a: A) => boolean) => [(s: Stream<A>) => s.takeWhile(f), (a: A[]) => _.takeWhile(a, f)])
+  withFlowProp(<A>(f: (a: A) => boolean) => [
+    (s: Stream<A>) => s.takeWhile(f),
+    (a: A[]) => _.takeWhile(a, f),
+  ])
     .testStreamsWithName(s => `${s} - basic`, (a: number) => a < 3)
     .testStreamsWithName(s => `${s} - take all`, () => true)
     .testStreamsWithName(s => `${s} - take none`, () => false)
@@ -95,7 +93,10 @@ describe('drop', () => {
 })
 
 describe('dropWhile', () => {
-  withFlowProp(<A>(f: (a: A) => boolean) => [(s: Stream<A>) => s.dropWhile(f), (a: A[]) => _.dropWhile(a, f)])
+  withFlowProp(<A>(f: (a: A) => boolean) => [
+    (s: Stream<A>) => s.dropWhile(f),
+    (a: A[]) => _.dropWhile(a, f),
+  ])
     .testStreamsWithName(s => `${s} - basic`, (a: number) => a < 3)
     .testStreamsWithName(s => `${s} - drop all`, () => true)
     .testStreamsWithName(s => `${s} - drop none`, () => false)
@@ -107,8 +108,7 @@ describe('scan', () => {
   withFlowProp(<A>(init: any, f: (b: any, a: A) => any) => [
     (s: Stream<A>) => s.scan(init, f),
     (a: A[]) => scan(a, init, f),
-  ])
-    .testStreams(0, (s: number, a: number) => s + a)
+  ]).testStreams(0, (s: number, a: number) => s + a)
 
   testStreamPurity(Stream.range(1, 5).scan<number>(0, (s, a) => s + a))
 })
@@ -121,12 +121,10 @@ function scan<A, S>(array: A[], zero: S, f: (s: S, a: A) => S) {
 }
 
 describe('mapAccum', () => {
-  withFlowProp(
-    <A>(
-      init: any,
-      f: (b: any, a: A) => [any, any],
-    ) => [(s: Stream<A>) => s.mapAccum(init, f), (a: A[]) => mapAccum(a, init, f)],
-  ).testStreams(0, (s: number, a: number) => [a, s + a])
+  withFlowProp(<A>(init: any, f: (b: any, a: A) => [any, any]) => [
+    (s: Stream<A>) => s.mapAccum(init, f),
+    (a: A[]) => mapAccum(a, init, f),
+  ]).testStreams(0, (s: number, a: number) => [a, s + a])
 
   testStreamPurity(Stream.range(1, 5).mapAccum<number, number>(0, (s, a) => [s + a, s]))
 })
@@ -144,8 +142,10 @@ function mapAccum<A, B, S>(array: A[], zero: S, f: (s: S, a: A) => [S, B]) {
 }
 
 describe('zipWithIndex', () => {
-  withFlowProp(<A>() => [(s: Stream<A>) => s.zipWithIndex(), (as: A[]) => _.zip(as, _.range(0, as.length))])
-    .testStreams()
+  withFlowProp(<A>() => [
+    (s: Stream<A>) => s.zipWithIndex(),
+    (as: A[]) => _.zip(as, _.range(0, as.length)),
+  ]).testStreams()
 
   testStreamPurity(Stream.range(1, 5).mapConcat((a: number) => [a, a + 2, a - 3]))
 })
@@ -154,7 +154,10 @@ describe('intersperse', () => {
   foreachStreams((name, stream) => {
     test(name, async () => {
       const expected = await stream.toArray().then(as => as.join(','))
-      const actual = await stream.intersperse(',').toArray().then(as => as.join(''))
+      const actual = await stream
+        .intersperse(',')
+        .toArray()
+        .then(as => as.join(''))
       expect(actual).toEqual(expected)
     })
   })
@@ -173,8 +176,7 @@ describe('mapAsync', () => {
   test('with delay', async () => {
     const events: string[] = []
     const array = [1, 2, 3, 4]
-    const result = await Stream
-      .from(array)
+    const result = await Stream.from(array)
       .mapAsync(async a => {
         events.push('in' + a)
         await delay(100)
@@ -186,7 +188,7 @@ describe('mapAsync', () => {
     expect(events).toEqual(['in1', 'out1', 'in2', 'out2', 'in3', 'out3', 'in4', 'out4'])
   })
 
-  for (const par of [1, 2]) {
+  for (const par of [1, 2, 3]) {
     test(`parallelism ${par}`, async () => {
       let concurrent: number = 0
       const events: number[] = []
@@ -217,8 +219,7 @@ describe('mapAsync', () => {
 
   test('parallelism and early finish', async () => {
     let count: number = 0
-    const result = await Stream
-      .range(1, 5)
+    const result = await Stream.range(1, 5)
       .mapAsync(async a => {
         count++
         await delay(100)
@@ -232,14 +233,15 @@ describe('mapAsync', () => {
 
   test('with failure', async () => {
     const result = await Stream.range(1, 5)
-      .mapAsync(n => n === 3 ? Promise.reject('my error') : Promise.resolve(n))
+      .mapAsync(n => (n === 3 ? Promise.reject('my error') : Promise.resolve(n)))
       .recover(r => r)
       .toArray()
     expect(result).toEqual([1, 2, 'my error'])
   })
 
   test('with upstream failure', async () => {
-    const result = await Stream.range(1, 2).concat(Stream.failed<number>('my error'))
+    const result = await Stream.range(1, 2)
+      .concat(Stream.failed<number>('my error'))
       .mapAsync(async n => n + 1)
       .recover(r => r)
       .toArray()
@@ -258,8 +260,7 @@ describe('mapAsyncUnordered', () => {
   test('with delay', async () => {
     const events: string[] = []
     const array = [1, 2, 3, 4]
-    const result = await Stream
-      .from(array)
+    const result = await Stream.from(array)
       .mapAsyncUnordered(async a => {
         events.push('in' + a)
         await delay(100)
@@ -302,8 +303,7 @@ describe('mapAsyncUnordered', () => {
 
   test('parallelism and early finish', async () => {
     let count: number = 0
-    const result = await Stream
-      .range(1, 5)
+    const result = await Stream.range(1, 5)
       .mapAsyncUnordered(async a => {
         count++
         await delay(100)
@@ -317,14 +317,15 @@ describe('mapAsyncUnordered', () => {
 
   test('with failure', async () => {
     const result = await Stream.range(1, 5)
-      .mapAsyncUnordered(n => n === 3 ? Promise.reject('my error') : Promise.resolve(n), 1)
+      .mapAsyncUnordered(n => (n === 3 ? Promise.reject('my error') : Promise.resolve(n)), 1)
       .recover(r => r)
       .toArray()
     expect(result).toEqual([1, 2, 'my error'])
   })
 
   test('with upstream failure', async () => {
-    const result = await Stream.range(1, 2).concat(Stream.failed<number>('my error'))
+    const result = await Stream.range(1, 2)
+      .concat(Stream.failed<number>('my error'))
       .mapAsyncUnordered(async n => n + 1, 2)
       .recover(r => r)
       .toArray()
@@ -347,7 +348,10 @@ describe('concat', () => {
   testStreamPurity(Stream.range(1, 3).concat(Stream.from([4, 5])))
 
   test('with early stop', async () => {
-    const result = await Stream.range(1, 3).concat(Stream.range(4, 5)).take(2).toArray()
+    const result = await Stream.range(1, 3)
+      .concat(Stream.range(4, 5))
+      .take(2)
+      .toArray()
     expect(result).toEqual([1, 2])
   })
 
@@ -408,7 +412,8 @@ describe('zipWith', () => {
     expect(result).toEqual([5, 7, 9])
   })
   test('left error', async () => {
-    const result = await Stream.single(1).concat(Stream.failed<number>('my error'))
+    const result = await Stream.single(1)
+      .concat(Stream.failed<number>('my error'))
       .zipWith(Stream.range(2, 4), (a, b) => a + b)
       .recover(err => err)
       .toArray()
@@ -441,7 +446,9 @@ describe('zip', () => {
 
 describe('merge', () => {
   test('interleave when sync - right end first', async () => {
-    const result = await Stream.range(1, 5).merge(Stream.range(11, 13)).toArray()
+    const result = await Stream.range(1, 5)
+      .merge(Stream.range(11, 13))
+      .toArray()
     expect(result).toEqual([1, 11, 2, 12, 3, 13, 4, 5])
   })
   test('interleave with 3 streams', async () => {
@@ -453,49 +460,78 @@ describe('merge', () => {
     expect(result).toEqual([1, 11, 21, 2, 12, 22, 3, 13, 23, 4, 14, 24, 5, 15, 25])
   })
   test('interleave when sync - left end first', async () => {
-    const result = await Stream.range(1, 3).merge(Stream.range(11, 15)).toArray()
+    const result = await Stream.range(1, 3)
+      .merge(Stream.range(11, 15))
+      .toArray()
     expect(result).toEqual([1, 11, 2, 12, 3, 13, 14, 15])
   })
   test('with early end', async () => {
-    const result = await Stream.range(1, 5).merge(Stream.range(11, 13)).take(3).toArray()
+    const result = await Stream.range(1, 5)
+      .merge(Stream.range(11, 13))
+      .take(3)
+      .toArray()
     expect(result).toEqual([1, 11, 2])
   })
   test('with early end when only left is still open', async () => {
-    const result = await Stream.range(1, 5).merge(Stream.empty()).take(3).toArray()
+    const result = await Stream.range(1, 5)
+      .merge(Stream.empty())
+      .take(3)
+      .toArray()
     expect(result).toEqual([1, 2, 3])
   })
   test('with early end when only right is still open', async () => {
-    const result = await Stream.empty().merge(Stream.range(1, 5)).take(3).toArray()
+    const result = await Stream.empty()
+      .merge(Stream.range(1, 5))
+      .take(3)
+      .toArray()
     expect(result).toEqual([1, 2, 3])
   })
   test('with delay - right end first', async () => {
-    const result = await delayedArray([1, 3], 100).merge(delayedArray([2], 150)).take(3).toArray()
+    const result = await delayedArray([1, 3], 100)
+      .merge(delayedArray([2], 150))
+      .take(3)
+      .toArray()
     expect(result).toEqual([1, 2, 3])
   })
   test('with delay - left end first', async () => {
-    const result = await delayedArray([2], 150).merge(delayedArray([1, 3], 100)).take(3).toArray()
+    const result = await delayedArray([2], 150)
+      .merge(delayedArray([1, 3], 100))
+      .take(3)
+      .toArray()
     expect(result).toEqual([1, 2, 3])
   })
   test('with delayed end - left end last', async () => {
     const result = await Stream.fromAsyncIterator(async function*() {
       yield 1
       await delay(50)
-    }).merge(Stream.empty()).toArray()
+    })
+      .merge(Stream.empty())
+      .toArray()
     expect(result).toEqual([1])
   })
   test('with delayed end - right end last', async () => {
-    const result = await Stream.empty().merge(Stream.fromAsyncIterator(async function*() {
-      yield 1
-      await delay(50)
-    })).toArray()
+    const result = await Stream.empty()
+      .merge(
+        Stream.fromAsyncIterator(async function*() {
+          yield 1
+          await delay(50)
+        }),
+      )
+      .toArray()
     expect(result).toEqual([1])
   })
   test('left error', async () => {
-    const result = await Stream.failed('my error').merge(Stream.range(1, 3)).recover(err => err).toArray()
+    const result = await Stream.failed('my error')
+      .merge(Stream.range(1, 3))
+      .recover(err => err)
+      .toArray()
     expect(result).toEqual(result.length > 1 ? [1, 'my error'] : ['my error'])
   })
   test('right error', async () => {
-    const result = await Stream.range(1, 3).merge(Stream.failed('my error')).recover(err => err).toArray()
+    const result = await Stream.range(1, 3)
+      .merge(Stream.failed('my error'))
+      .recover(err => err)
+      .toArray()
     expect(result).toEqual(result.length > 1 ? [1, 'my error'] : ['my error'])
   })
   testStreamPurity(Stream.range(1, 3).merge(Stream.range(11, 13)))
@@ -505,7 +541,7 @@ describe('recover', () => {
   test('simple', async () => {
     const result = await Stream.range(1, 3)
       .concat(Stream.failed('my error'))
-      .recover(err => err === 'my error' ? 4 : 0)
+      .recover(err => (err === 'my error' ? 4 : 0))
       .toArray()
     expect(result).toEqual([1, 2, 3, 4])
   })

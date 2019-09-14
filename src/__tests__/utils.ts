@@ -1,13 +1,12 @@
-import { delay } from '../promises'
+import { delay } from '../helpers'
 import { Pipe, Stream } from '../stream'
 
 interface TimeStep<A> {
-  duration: number,
+  duration: number
   value: A
 }
 
 export class TimedStream<A> {
-
   static of<A>(sequence: [number, A][]) {
     return new TimedStream<A>(sequence.map(([duration, value]) => ({ duration, value }))).toStream()
   }
@@ -16,8 +15,7 @@ export class TimedStream<A> {
     return new TimedStream<A>().then(duration, value)
   }
 
-  constructor(private readonly sequence: TimeStep<A>[] = []) {
-  }
+  constructor(private readonly sequence: TimeStep<A>[] = []) {}
 
   then(duration: number, value: A): this {
     this.sequence.push({ duration, value })
@@ -36,14 +34,15 @@ export class TimedStream<A> {
 }
 
 export function withTime<A>(): Pipe<A, [A, number]> {
-  return s => Stream.lazy(() => {
-    const startTime = new Date().getTime()
-    return s.map<[A, number]>(a => [a, new Date().getTime() - startTime])
-  })
+  return s =>
+    Stream.lazy(() => {
+      const startTime = new Date().getTime()
+      return s.map<[A, number]>(a => [a, new Date().getTime() - startTime])
+    })
 }
 
 interface TimedEvent {
-  duration: number,
+  duration: number
   action: () => void
 }
 
@@ -63,4 +62,18 @@ export function delayed<A>(duration: number, result: A): Promise<A> {
 export function checkTime(time: number, expectedTime: number) {
   expect(time).toBeGreaterThan(expectedTime - 50)
   expect(time).toBeLessThan(expectedTime + 50)
+}
+
+export function streamToClose(): { stream: Stream<number>; closed: boolean } {
+  return new (class {
+    closed = false
+    iterator: Iterator<number> = {
+      next: () => ({ done: false, value: 1 }),
+      return: () => {
+        this.closed = true
+        return { done: true, value: undefined }
+      },
+    }
+    stream = Stream.fromIterator(() => this.iterator)
+  })()
 }

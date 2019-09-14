@@ -1,17 +1,21 @@
-import { Stream } from "../stream";
+import { Stream } from '../stream'
 
 describe('recoverWith', () => {
   test('simple', async () => {
     const result = await Stream.range(1, 3)
       .concat(Stream.failed('my error'))
-      .recoverWithRetries(1, err => err === 'my error' ? Stream.range(4, 6) : Stream.empty())
+      .recoverWithRetries(1, err =>
+        err === 'my error' ? Stream.range(4, 6) : Stream.empty<number>(),
+      )
       .toArray()
     expect(result).toEqual([1, 2, 3, 4, 5, 6])
   })
 
   test('without error', async () => {
     const result = await Stream.range(1, 3)
-      .recoverWithRetries(1, err => err === 'my error' ? Stream.range(4, 6) : Stream.empty())
+      .recoverWithRetries(1, err =>
+        err === 'my error' ? Stream.range(4, 6) : Stream.empty<number>(),
+      )
       .toArray()
     expect(result).toEqual([1, 2, 3])
   })
