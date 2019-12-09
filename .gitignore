@@ -1,8 +1,8 @@
 .idea
+.vscode
 .temp
-.docz
 dist
 node_modules
-/docs/generated
 /coverage
 .DS_Store
+yarn-error.log

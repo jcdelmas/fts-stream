@@ -1,0 +1,43 @@
+import _ from 'lodash'
+import { Stream } from '../stream'
+import { testStreamPurity } from './helpers'
+
+describe('sliding', () => {
+  test('simple', async () => {
+    const result = await Stream.range(1, 11)
+      .sliding(4)
+      .toArray()
+    expect(result).toEqual([
+      [1, 2, 3, 4],
+      [2, 3, 4, 5],
+      [3, 4, 5, 6],
+      [4, 5, 6, 7],
+      [5, 6, 7, 8],
+      [6, 7, 8, 9],
+      [7, 8, 9, 10],
+    ])
+  })
+
+  test('with step > 1', async () => {
+    const result = await Stream.range(1, 11)
+      .sliding(4, 2)
+      .toArray()
+    expect(result).toEqual([[1, 2, 3, 4], [3, 4, 5, 6], [5, 6, 7, 8], [7, 8, 9, 10]])
+  })
+
+  test('with small last window', async () => {
+    const result = await Stream.range(1, 10)
+      .sliding(4, 3)
+      .toArray()
+    expect(result).toEqual([[1, 2, 3, 4], [4, 5, 6, 7], [7, 8, 9]])
+  })
+
+  test('with step > n', async () => {
+    const result = await Stream.range(1, 11)
+      .sliding(2, 3)
+      .toArray()
+    expect(result).toEqual([[1, 2], [4, 5], [7, 8], [10]])
+  })
+
+  testStreamPurity(Stream.range(1, 12).sliding(3, 2))
+})

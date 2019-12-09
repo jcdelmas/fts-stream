@@ -3,21 +3,14 @@
     "target": "ES2017",
     "module": "commonjs",
     "declaration": true,
-    "lib": [
-      "es5",
-      "es6",
-      "es2015.core",
-      "es2017",
-      "esnext"
-    ],
+    "lib": ["es5", "es6", "es2015.core", "es2017", "esnext", "esnext.asynciterable"],
     "sourceMap": true,
-    "outDir": "./dist",
-    "rootDir": "./src",
     "strict": true,
-    "types": [
-      "jest",
-      "node"
-    ],
-    "esModuleInterop": true
-  }
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nighttrax/*": ["packages/*/src"]
+    }
+  },
+  "exclude": ["node_modules", "**/__tests__/**/*"]
 }

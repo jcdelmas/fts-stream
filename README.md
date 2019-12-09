@@ -1,35 +1,39 @@
+# FTS-Stream
 
-## Missing functions
+## Introduction
 
-### Streams
+Stream processing library for NodeJS and the browser.
 
- * From event
- * Tick
+ * Typesafe
+ * Asynchronous
+ * Functional
+ * Lazy
+ * Back-pressure
 
-### Pipe
+```typescript
+const fahrenheitToCelsius = (f: number): number => (f - 32.0) * (5.0/9.0);
 
- * reduceAsync
- * scanAsync
- * distinctBy
- * groupAdjacentBy
- * groupWithin
- * Add inclusive parameter to `takeWhile`
- * Replaces `recoverWithRetries` by something like `attempts` in FS2.
+await readTextFile('testdata/fahrenheit.txt', 'UTF-8')
+    .pipe(text.lines)
+    .filter(s => s.trim().length > 0 && !s.startsWith('//'))
+    .map(line => fahrenheitToCelsius(Number(line)).toString())
+    .intersperse('\n')
+    .to(writeTextFile('testdata/celsius.txt'));
+```
 
-### Fan-in
+## Installation
 
- * Interleave
- * Dynamic merge
+    npm i fts-stream
 
-### Fan-out
+    yarn add fts-stream
 
- * `alsoTo`
- * `observe`: Like `alsoTo` but without backpressure (drop elements)
- * Dynamic balance
- * Dynamic broadcast
+## Guide
 
-### Sinks
+### Back pressure
 
- * reduce1 (no zero)
- * head
- * last
+### Error handling
+
+
+## API
+
+

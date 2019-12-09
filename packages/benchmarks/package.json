@@ -1,0 +1,30 @@
+{
+  "name": "@fts-stream/benchmarks",
+  "version": "0.1.0",
+  "main": "dist/benchmark.js",
+  "types": "dist/benchmark.d.ts",
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "watch": "tsc -w",
+    "clean": "rimraf dist",
+    "lint": "tslint -p tsconfig.json",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/highland": "^2.12.4",
+    "@types/node": "^12.7.12",
+    "prettier": "^1.18.2",
+    "ts-jest": "^24.1.0",
+    "ts-node": "^8.4.1",
+    "tslint": "^5.20.0",
+    "typescript": "^3.6.4"
+  },
+  "dependencies": {
+    "@fts-stream/core": "^0.1.0",
+    "highland": "^2.13.5",
+    "lodash": "^4.17.15"
+  }
+}
