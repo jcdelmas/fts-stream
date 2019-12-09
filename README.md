@@ -29,6 +29,12 @@ await readTextFile('testdata/fahrenheit.txt', 'UTF-8')
 
 ## Guide
 
+### Main concepts
+
+ * Stream
+ * Pipe
+ * Sink
+
 ### Back pressure
 
 ### Error handling
